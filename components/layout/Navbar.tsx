@@ -256,7 +256,7 @@ export function Navbar() {
 
         {/* CTA */}
         <a
-          href="https://github.com/your-org/solana-agent-wallet"
+          href="https://github.com/emmyCode4495/agentixx"
           target="_blank"
           rel="noopener noreferrer"
           className="agw-cta"

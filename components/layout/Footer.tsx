@@ -4,7 +4,7 @@ const LINKS = [
   { label: "Deep Dive", href: "/about" },
   { label: "Dashboard", href: "/dashboard" },
   { label: "Health", href: "/api/health" },
-  { label: "GitHub", href: "https://github.com/your-org/solana-agent-wallet", external: true },
+  { label: "GitHub", href: "https://github.com/emmyCode4495/agentixx", external: true },
 ]
 
 const STATS = [
