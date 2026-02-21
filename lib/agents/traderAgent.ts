@@ -1,18 +1,41 @@
-import { SystemProgram, Transaction, PublicKey } from "@solana/web3.js"
-import { BaseAgent } from "./baseAgent"
+/**
+ * lib/agents/traderAgent.ts
+ * Momentum-based trading agent.
+ *
+ * Decision rules:
+ *   price < 40  → BUY  (undervalued)
+ *   price > 70  → SELL (take profit)
+ *   otherwise   → HOLD
+ */
+
+import { WalletEngine } from "../wallet/engine"
+import { BaseAgent, MarketState, TradeDecision } from "./baseAgent"
 
 export class TraderAgent extends BaseAgent {
-  async decide() {
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: (this as any).wallet.keypair.publicKey,
-        toPubkey: new PublicKey(
-          (this as any).wallet.keypair.publicKey
-        ),
-        lamports: 1000,
-      })
-    )
+  constructor(id: string, wallet: WalletEngine) {
+    super(id, wallet, 15_000)
+  }
 
-    await (this as any).wallet.execute(tx)
+  strategy(market: MarketState, balanceSOL: number): TradeDecision {
+    const { price } = market
+
+    if (price < 40) {
+      return {
+        type:   "BUY",
+        reason: `Price ${price.toFixed(2)} below momentum threshold — entering position`,
+      }
+    }
+
+    if (price > 70) {
+      return {
+        type:   "SELL",
+        reason: `Price ${price.toFixed(2)} above target — taking profit`,
+      }
+    }
+
+    return {
+      type:   "HOLD",
+      reason: `Price ${price.toFixed(2)} in neutral zone — holding position`,
+    }
   }
 }

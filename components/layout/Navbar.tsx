@@ -1,8 +1,7 @@
-
-
 "use client"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { House, BookOpen, LayoutDashboard } from "lucide-react"
 
 const NAV_LINKS = [
   { href: "/", label: "Home" },
@@ -130,7 +129,7 @@ export function Navbar() {
           opacity: 0.75;
         }
 
-        /* ── NAV LINKS ── */
+        /* ── NAV LINKS (desktop) ── */
         .agw-nav {
           display: flex;
           align-items: center;
@@ -224,8 +223,109 @@ export function Navbar() {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.4; transform: scale(0.7); }
         }
+
+        /* ── MOBILE BOTTOM TAB BAR ── */
+        .agw-mobile-tabs {
+          display: none;
+        }
+
+        @media (max-width: 640px) {
+          /* Hide desktop nav and CTA */
+          .agw-nav {
+            display: none;
+          }
+          .agw-cta {
+            display: none;
+          }
+
+          /* Show mobile bottom tab bar */
+          .agw-mobile-tabs {
+            display: flex;
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            z-index: 50;
+            height: 64px;
+            background: rgba(6, 6, 10, 0.92);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255,255,255,0.06);
+            align-items: stretch;
+            font-family: 'Space Mono', monospace;
+          }
+
+          /* top glow line on tab bar */
+          .agw-mobile-tabs::before {
+            content: '';
+            position: absolute;
+            top: -1px; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(
+              90deg,
+              transparent 0%,
+              #9945FF 20%,
+              #14F195 50%,
+              #9945FF 80%,
+              transparent 100%
+            );
+            opacity: 0.7;
+          }
+
+          .agw-tab-link {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            text-decoration: none;
+            color: rgba(255,255,255,0.4);
+            font-size: 0.6rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            transition: color 0.2s;
+            position: relative;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+          }
+
+          .agw-tab-link:hover {
+            color: rgba(255,255,255,0.75);
+          }
+
+          .agw-tab-link.active {
+            color: #14F195;
+          }
+
+          /* active indicator line at top of tab */
+          .agw-tab-link.active::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 20%; right: 20%;
+            height: 2px;
+            background: linear-gradient(90deg, #9945FF, #14F195);
+            border-radius: 0 0 2px 2px;
+          }
+
+          .agw-tab-icon {
+            font-size: 1.1rem;
+            line-height: 1;
+          }
+
+          .agw-tab-label {
+            font-size: 0.55rem;
+            letter-spacing: 0.05em;
+          }
+
+          /* pulse dot inside tab */
+          .agw-tab-link .agw-pulse {
+            position: absolute;
+            top: 10px;
+            right: calc(50% - 18px);
+            margin: 0;
+          }
+        }
       `}</style>
 
+      {/* ── DESKTOP / TABLET HEADER ── */}
       <header className="agw-navbar">
         {/* LOGO */}
         <Link href="/" className="agw-logo">
@@ -236,7 +336,7 @@ export function Navbar() {
           </span>
         </Link>
 
-        {/* NAV */}
+        {/* NAV (hidden on mobile) */}
         <nav className="agw-nav">
           {NAV_LINKS.map(({ href, label }) => {
             const isActive = pathname === href
@@ -254,7 +354,7 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* CTA */}
+        {/* CTA (hidden on mobile) */}
         <a
           href="https://github.com/emmyCode4495/agentixx"
           target="_blank"
@@ -264,6 +364,29 @@ export function Navbar() {
           GitHub →
         </a>
       </header>
+
+      {/* ── MOBILE BOTTOM TAB BAR ── */}
+      <nav className="agw-mobile-tabs">
+        {NAV_LINKS.map(({ href, label }) => {
+          const isActive = pathname === href
+          const isLive = label === "Live Dashboard"
+          const Icon =
+            label === "Home" ? House :
+            label === "Deep Dive" ? BookOpen :
+            LayoutDashboard
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`agw-tab-link${isActive ? " active" : ""}`}
+            >
+              {isLive && <span className="agw-pulse" />}
+              <span className="agw-tab-icon"><Icon size={20} strokeWidth={1.75} /></span>
+              <span className="agw-tab-label">{label}</span>
+            </Link>
+          )
+        })}
+      </nav>
     </>
   )
 }

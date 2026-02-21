@@ -10,6 +10,7 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
   sendAndConfirmTransaction,
   LAMPORTS_PER_SOL,
   type TransactionSignature,
@@ -147,6 +148,42 @@ export async function sendSOL(
       lamports: Math.floor(amountSOL * LAMPORTS_PER_SOL),
     })
   )
+  return sendAndConfirmTransaction(conn, tx, [fromKeypair], {
+    commitment: "confirmed",
+  })
+}
+
+// ── Memo transaction (used for SELL — real on-chain record) ───────
+/**
+ * Solana Memo program — records arbitrary UTF-8 data permanently on-chain.
+ * Every SELL decision is logged here so it's verifiable on Explorer,
+ * even though no SOL changes hands (no counterparty without a deployed program).
+ */
+const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
+
+/**
+ * Sends a transaction containing only a Memo instruction.
+ * The memo string (JSON trade metadata) is signed by the agent's keypair
+ * and permanently written to Solana devnet — fully verifiable on Explorer.
+ *
+ * @param fromKeypair  agent's signing keypair
+ * @param memo         UTF-8 string to record (typically JSON)
+ * @returns confirmed transaction signature
+ */
+export async function sendMemoTransaction(
+  fromKeypair: Keypair,
+  memo: string
+): Promise<TransactionSignature> {
+  const conn = getConnection()
+
+  const memoInstruction = new TransactionInstruction({
+    keys: [{ pubkey: fromKeypair.publicKey, isSigner: true, isWritable: false }],
+    programId: MEMO_PROGRAM_ID,
+    data: Buffer.from(memo, "utf-8"),
+  })
+
+  const tx = new Transaction().add(memoInstruction)
+
   return sendAndConfirmTransaction(conn, tx, [fromKeypair], {
     commitment: "confirmed",
   })

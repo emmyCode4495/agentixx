@@ -1,111 +1,17 @@
-// const FEATURES = [
-//   {
-//     icon: "🔑",
-//     title: "Programmatic wallet creation",
-//     description:
-//       "Each agent generates a fresh ed25519 keypair via Node.js crypto. No browser, no UI prompt — pure programmatic key generation.",
-//   },
-//   {
-//     icon: "✍️",
-//     title: "Autonomous transaction signing",
-//     description:
-//       "Agents sign and broadcast Solana transactions in milliseconds using their in-memory keypair — no human approval required at any step.",
-//   },
-//   {
-//     icon: "🏦",
-//     title: "SOL & SPL token support",
-//     description:
-//       "Wallets can hold, send, and receive native SOL and any SPL token. Token accounts are created automatically on first use.",
-//   },
-//   {
-//     icon: "🔒",
-//     title: "AES-256-GCM encrypted keystores",
-//     description:
-//       "Private keys are encrypted with AES-256-GCM + scrypt KDF before touching disk. The GCM auth tag detects any tampering.",
-//   },
-//   {
-//     icon: "🤖",
-//     title: "AI decision loop",
-//     description:
-//       "BaseAgent provides a gatherState → makeDecision → executeDecision loop. Swap in any model — rule-based, LLM, or RL agent.",
-//   },
-//   {
-//     icon: "🌐",
-//     title: "Multi-agent fleet",
-//     description:
-//       "WalletRegistry spins up N independent agents, each with its own keypair, keystore, and autonomous execution loop running concurrently.",
-//   },
-//   {
-//     icon: "⚡",
-//     title: "MockDex protocol interaction",
-//     description:
-//       "Agents trade against a simulated DEX that submits real Solana devnet transactions — proving actual signing and broadcasting works.",
-//   },
-//   {
-//     icon: "📋",
-//     title: "SKILLS.md for AI agents",
-//     description:
-//       "A machine-readable interface spec so other AI agents can discover and use the wallet API without reading human documentation.",
-//   },
-//   {
-//     icon: "🛡️",
-//     title: "Threat-modeled security",
-//     description:
-//       "Every threat — plaintext key leak, tampered keystore, replay attacks, cross-agent contamination — is documented and mitigated.",
-//   },
-// ]
 
-// export function Features() {
-//   return (
-//     <section style={{ padding: "4rem 1.5rem 6rem", maxWidth: "1200px", margin: "0 auto" }}>
-//       <div style={{ textAlign: "center", marginBottom: "4rem" }}>
-//         <h2 style={{
-//           fontFamily: "var(--font-display)",
-//           fontSize: "clamp(2rem, 5vw, 3.5rem)", fontWeight: 400,
-//           letterSpacing: "-0.03em", marginBottom: "1rem",
-//         }}>
-//           Everything the bounty requires.
-//         </h2>
-//         <p style={{ color: "var(--muted-foreground)", fontSize: "1.05rem" }}>
-//           Built and running on Solana devnet — not a mockup.
-//         </p>
-//       </div>
 
-//       <div style={{
-//         display: "grid",
-//         gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-//         gap: "1px", background: "var(--border)",
-//         border: "1px solid var(--border)", borderRadius: "24px",
-//         overflow: "hidden",
-//       }}>
-//         {FEATURES.map(({ icon, title, description }) => (
-//           <div key={title} style={{
-//             background: "var(--card)", padding: "2rem",
-//             transition: "background 0.2s",
-//           }}>
-//             <span style={{ fontSize: "1.75rem", display: "block", marginBottom: "1rem" }}>
-//               {icon}
-//             </span>
-//             <h3 style={{
-//               fontFamily: "var(--font-display)", fontSize: "1.15rem",
-//               fontWeight: 400, letterSpacing: "-0.02em",
-//               marginBottom: "0.5rem", color: "var(--foreground)",
-//             }}>
-//               {title}
-//             </h3>
-//             <p style={{ color: "var(--muted-foreground)", fontSize: "0.875rem", lineHeight: 1.7 }}>
-//               {description}
-//             </p>
-//           </div>
-//         ))}
-//       </div>
-//     </section>
-//   )
-// }
-
-import { Key, PenLine, Landmark, Lock, Bot, Globe, Zap, FileText, ShieldCheck } from "lucide-react"
+import { Key, PenLine, Landmark, Lock, Bot, Globe, Zap, FileText, ShieldCheck, BookOpen } from "lucide-react"
 
 const FEATURES = [
+   {
+    Icon: BookOpen,
+    accent: "#14F195",
+    rgb: "20,241,149",
+    title: "Full deep dive writeup",
+    description:
+      "Wallet design, security model, and AI integration explained end-to-end — from keypair entropy to encrypted keystores to the autonomous decision loop.",
+    href: "/about",
+  },
   {
     Icon: Key,
     accent: "#9945FF",
@@ -144,7 +50,7 @@ const FEATURES = [
     rgb: "153,69,255",
     title: "AI decision loop",
     description:
-      "BaseAgent provides a gatherState → makeDecision → executeDecision loop. Swap in any model — rule-based, LLM, or RL agent.",
+      "BaseAgent provides a strategy → execute loop. Swap in any model — rule-based, LLM, or RL agent — without touching the wallet layer.",
   },
   {
     Icon: Globe,
@@ -178,6 +84,7 @@ const FEATURES = [
     description:
       "Every threat — plaintext key leak, tampered keystore, replay attacks, cross-agent contamination — is documented and mitigated.",
   },
+ 
 ]
 
 export function Features() {
@@ -190,7 +97,7 @@ export function Features() {
       background: "rgb(6, 6, 10)",
     }}>
 
-      {/* Scanline texture — same as hero */}
+      {/* Scanline texture */}
       <div aria-hidden style={{
         position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0,
         background: `repeating-linear-gradient(
@@ -201,7 +108,7 @@ export function Features() {
         )`,
       }} />
 
-      {/* Dot grid — same as hero */}
+      {/* Dot grid */}
       <div aria-hidden style={{
         position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0,
         backgroundImage: `
@@ -260,21 +167,21 @@ export function Features() {
             letterSpacing: "-0.04em", marginBottom: "1rem",
             color: "#fff", lineHeight: 1.1,
           }}>
-            Everything the bounty{" "}
+            One fleet. Nine capabilities.{" "}
             <span style={{
               background: "linear-gradient(90deg, #9945FF 0%, #14F195 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
               backgroundClip: "text",
               filter: "drop-shadow(0 0 16px rgba(20,241,149,0.25))",
-            }}>requires.</span>
+            }}> Zero human intervention.</span>
           </h2>
           <p style={{
             color: "rgba(255,255,255,0.4)",
             fontSize: "0.8rem", letterSpacing: "0.1em",
             textTransform: "uppercase",
           }}>
-            Built and running on Solana devnet — not a mockup.
+            Built and running on Solana devnet
           </p>
         </div>
 
@@ -288,22 +195,26 @@ export function Features() {
           borderRadius: "20px",
           overflow: "hidden",
         }}>
-          {FEATURES.map(({ Icon, accent, rgb, title, description }) => {
+          {FEATURES.map(({ Icon, accent, rgb, title, description, href }) => {
             const isPurple = rgb === "153,69,255"
+            const Tag = href ? "a" : "div"
             return (
-              <div
+              <Tag
                 key={title}
-                className={`aw-card ${isPurple ? "aw-card--purple" : "aw-card--green"}`}
+                {...(href ? { href, style: { textDecoration: "none" } } : {})}
+                className={`aw-card ${isPurple ? "aw-card--purple" : "aw-card--green"}${href ? " aw-card--link" : ""}`}
                 style={{
                   background: "rgb(6,6,10)",
                   padding: "2rem",
                   position: "relative",
                   overflow: "hidden",
-                  cursor: "default",
+                  cursor: href ? "pointer" : "default",
                   transition: "background 0.3s ease",
+                  display: "block",
+                  textDecoration: "none",
                 }}
               >
-                {/* Radial spotlight — floods in from top on hover */}
+                {/* Radial spotlight */}
                 <div className="aw-card__radial" aria-hidden style={{
                   position: "absolute", inset: 0, pointerEvents: "none",
                   background: `radial-gradient(circle 200px at 50% -20%, rgba(${rgb},0.22) 0%, transparent 70%)`,
@@ -320,7 +231,7 @@ export function Features() {
                   transition: "opacity 0.35s ease",
                 }} />
 
-                {/* Corner spark — top left */}
+                {/* Corner spark */}
                 <div className="aw-card__spark" aria-hidden style={{
                   position: "absolute",
                   top: -5, left: -5,
@@ -360,10 +271,26 @@ export function Features() {
                   color: "rgba(255,255,255,0.35)",
                   fontSize: "0.78rem",
                   lineHeight: 1.85,
+                  margin: 0,
                 }}>
                   {description}
                 </p>
-              </div>
+
+                {/* Link indicator — only on the deep dive card */}
+                {href && (
+                  <p className="aw-card__cta" style={{
+                    marginTop: "1rem",
+                    fontSize: "0.72rem",
+                    color: "#14F195",
+                    letterSpacing: "0.06em",
+                    display: "flex", alignItems: "center", gap: 4,
+                    opacity: 0,
+                    transition: "opacity 0.25s ease",
+                  }}>
+                    Read the deep dive →
+                  </p>
+                )}
+              </Tag>
             )
           })}
         </div>
@@ -375,15 +302,9 @@ export function Features() {
         .aw-card--purple:hover {
           background: rgba(153,69,255,0.05) !important;
         }
-        .aw-card--purple:hover .aw-card__radial {
-          opacity: 1 !important;
-        }
-        .aw-card--purple:hover .aw-card__topline {
-          opacity: 1 !important;
-        }
-        .aw-card--purple:hover .aw-card__spark {
-          opacity: 0.85 !important;
-        }
+        .aw-card--purple:hover .aw-card__radial { opacity: 1 !important; }
+        .aw-card--purple:hover .aw-card__topline { opacity: 1 !important; }
+        .aw-card--purple:hover .aw-card__spark { opacity: 0.85 !important; }
         .aw-card--purple:hover .aw-card__icon {
           background: rgba(153,69,255,0.18) !important;
           border-color: rgba(153,69,255,0.5) !important;
@@ -393,19 +314,21 @@ export function Features() {
         .aw-card--green:hover {
           background: rgba(20,241,149,0.03) !important;
         }
-        .aw-card--green:hover .aw-card__radial {
-          opacity: 1 !important;
-        }
-        .aw-card--green:hover .aw-card__topline {
-          opacity: 1 !important;
-        }
-        .aw-card--green:hover .aw-card__spark {
-          opacity: 0.85 !important;
-        }
+        .aw-card--green:hover .aw-card__radial { opacity: 1 !important; }
+        .aw-card--green:hover .aw-card__topline { opacity: 1 !important; }
+        .aw-card--green:hover .aw-card__spark { opacity: 0.85 !important; }
         .aw-card--green:hover .aw-card__icon {
           background: rgba(20,241,149,0.15) !important;
           border-color: rgba(20,241,149,0.45) !important;
           box-shadow: 0 0 24px rgba(20,241,149,0.28), inset 0 0 14px rgba(20,241,149,0.1) !important;
+        }
+
+        /* Extra glow on the linked deep dive card */
+        .aw-card--link:hover {
+          box-shadow: inset 0 0 0 1px rgba(20,241,149,0.2) !important;
+        }
+        .aw-card--link:hover .aw-card__cta {
+          opacity: 1 !important;
         }
       `}</style>
     </section>

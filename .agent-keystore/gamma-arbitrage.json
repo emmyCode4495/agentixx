@@ -1,0 +1,8 @@
+{
+  "agentId": "gamma-arbitrage",
+  "publicKey": "7bKynt4HuYpX63pvbXeGVurB9Zd6toPNSZMziVrbuvsb",
+  "enc": "67fefc4a312326dfb03e45041954f1761043a52ae892e398d32434c473a5a66c0d483c9147d67645c6692dfaedd8a7c9a2c37d3a0bef9aed92f9fc048c33df1329a14b8cc4159025145cf099e16c30709403da246c00fad460c671efe7957d3a99e45a71cbb3783e135e62c9781cdb55f6766a2656025cf9919e10788b223ad0",
+  "iv": "7f1a1188196b8be46a7e100a",
+  "tag": "0390af2b75f0fbf6fa75c99f7803b50f",
+  "createdAt": "2026-02-21T06:55:59.363Z"
+}

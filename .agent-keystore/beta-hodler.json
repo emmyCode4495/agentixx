@@ -1,0 +1,8 @@
+{
+  "agentId": "beta-hodler",
+  "publicKey": "6wAzuYvwxcXMRmgjns4rGx2nKdLn4QKQnxXQzrZZnHYp",
+  "enc": "772ab62df0eddd89384ce99aa7f97663e29b6c5e82873845db767f8ca4213e5750bd39a5f59fb1dc3767f2cccc9740406adfa3de791701825b2f8bfe02216a7c355c98f72376fa6f80be174f798684940b07a9cb35f53b1001a6de40657c0f63c5929b1f3ddeac1329ae5035fd05708be97e2758877eab30a5dcb1300f5b204f",
+  "iv": "9136dd83840e00a660df5bac",
+  "tag": "a17d0f1adb5c733f1f9e28e0379fce99",
+  "createdAt": "2026-02-21T06:55:56.342Z"
+}

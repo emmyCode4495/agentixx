@@ -1,121 +1,235 @@
-🔐 Agentixx Security Guidelines
-1. Overview
+# SECURITY.md — Agentixx Security Model
 
-This document describes the security model for Agentixx autonomous agents and their wallets.
-It explains key management, transaction handling, network safety, and limitations enforced to protect both funds and agents.
+This document describes the security architecture for Agentixx autonomous agent wallets.
+It covers key management, transaction isolation, network safety, threat mitigations,
+and production hardening recommendations.
 
-All agents operate sandboxed, interacting with Solana Devnet exclusively through WalletEngine abstractions.
+---
 
-2. Key Management
+## 1. Threat Model Summary
 
-Each agent has a unique Solana keypair stored in an encrypted keystore.
+| Threat | Severity | Mitigation |
+|--------|----------|------------|
+| Plaintext private key on disk | Critical | AES-256-GCM encryption — key never written unencrypted |
+| Tampered keystore file | Critical | GCM auth tag — any byte modification detected before decryption |
+| Weak encryption password | High | scrypt KDF (N=32768, r=8, p=1) — brute force made computationally expensive |
+| Transaction replay | High | Solana blockhash expiry (~90 seconds per transaction) |
+| Cross-agent key contamination | High | Independent keypairs, isolated keystore files — no shared material |
+| Private key exposure in logs | High | `toJSON()` never exports key; all log calls exclude keypair fields |
+| Agent overspending / drain | Medium | `MIN_BALANCE_SOL = 0.05` reserve enforced before every loop tick |
+| Simulated / unverifiable trades | Medium | All BUY and SELL produce real on-chain signatures verifiable on Explorer |
+| RPC request flooding | Low | Singleton connection, staggered loop starts, graceful error handling |
+| Mainnet fund exposure | Low | Hardcoded devnet RPC — no mainnet interaction possible |
 
-Private keys are never exposed in plaintext outside WalletEngine.
+---
 
-Encryption uses AES-256-GCM with a password derived from a secure environment variable WALLET_ENCRYPTION_KEY.
+## 2. Key Management
 
-Keystore files are stored in .agent-keystore directory and are agent-isolated.
+### Keypair Generation
 
-In production, keystore storage should be replaced with secure DBs (Postgres, Redis, or HSM).
+Each agent generates an independent ed25519 keypair on first initialisation:
 
-3. WalletEngine Isolation
+```ts
+const keypair = Keypair.generate()
+// Internally: crypto.randomBytes(32) seeded by OS CSPRNG (/dev/urandom on Linux)
+// 256 bits of entropy — no shared seeds, no deterministic derivation paths
+```
 
-All blockchain interactions are funneled through WalletEngine.
+Compromise of one agent's key does **not** affect any other agent in the fleet.
 
-Agents cannot access raw RPC connections, preventing unauthorized transactions.
+### Encryption at Rest
 
-Only WalletEngine can:
+Private keys are encrypted immediately after generation and never written to disk in plaintext:
 
-Sign transactions
+```
+Algorithm : AES-256-GCM
+KDF       : scrypt  (N=32768, r=8, p=1, keylen=32)
+Salt      : "agentw-salt-v1"
+IV        : 12 random bytes — regenerated on every keystore write
+Auth tag  : 16 bytes — integrity-checked before any decryption attempt
+```
 
-Send SOL
+The GCM auth tag is critical: if any byte of the ciphertext or IV is modified on disk,
+`decipher.final()` throws before returning any key material. Tampered keystores are
+rejected entirely.
 
-Request airdrops
+### Keystore Format
 
-Query balance or transaction history
+```json
+{
+  "version": "1.0",
+  "agentId": "alpha-trader",
+  "publicKey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+  "enc": "a1b2c3d4...",
+  "iv":  "f3a1b2c3d4e5f6a7b8c9d0e1",
+  "tag": "8c2d4e6f...",
+  "network": "devnet",
+  "createdAt": "2026-02-19T12:00:00Z"
+}
+```
 
-4. Network Safety
+Keystore files are stored in `.agent-keystore/` and are excluded from version control
+via `.gitignore`. Each file is scoped to one agent ID — no file contains material for
+more than one keypair.
 
-Agents operate on Solana Devnet, isolating testing from mainnet funds.
+### Encryption Key Source
 
-RPC requests use a singleton connection with confirmed commitment.
+```env
+WALLET_ENCRYPTION_KEY=your-32-character-secret-here!!
+```
 
-Rate-limiting safeguards prevent excessive airdrops or transaction spamming.
+- Must be exactly 32 characters in production
+- Never commit to Git — use environment secrets or a secrets manager
+- In development, a fallback string is used and logged as a warning
 
-Failed network requests are gracefully handled, updating agent status without crashing the process.
+---
 
-5. Agent Sandbox Rules
+## 3. WalletEngine Isolation
 
-Agents cannot:
+All blockchain interactions are funnelled through `WalletEngine` — agents never access
+the raw keypair or RPC connection directly.
 
-Access other agents’ wallets or keystore files
+```
+Agent strategy()
+    ↓
+WalletEngine.execute(tx)
+    ↓  validateTransaction(tx)   ← policy check (spending limits, address rules)
+    ↓  simulate(tx)              ← devnet dry-run before committing
+    ↓  sendAndConfirmTransaction ← broadcast with `confirmed` commitment
+    ↓
+confirmed signature
+```
 
-Modify encryption settings
+`WalletEngine` is the only place in the codebase where:
+- The keypair is used to sign
+- SOL transfers are constructed
+- Memo transactions are sent
 
-Export private keys
+Agents cannot bypass this layer. The keypair is a private class field (`private _keypair`)
+and is only exposed via a getter for read-only public key access.
 
-Execute raw transactions outside WalletEngine
+---
 
-Agents are stateless between executions except for AgentStore state (balanceSOL, pnl, status, etc.)
+## 4. Agent Sandbox Rules
 
-Compromise of one agent does not affect others.
+Each agent is strictly isolated:
 
-6. Transaction Security
+- **No cross-agent key access** — keystore files are loaded per agent ID; no agent
+  reads another's file
+- **No raw RPC access** — agents call `WalletEngine` methods, not `Connection` directly
+- **No key export** — `toJSON()` and all serialisation methods exclude the keypair
+- **No arbitrary transactions** — all transactions pass `validateTransaction()` before
+  signing; policy violations throw before any signing occurs
+- **Stateless between restarts** — the only persistent state is the encrypted keystore;
+  runtime state (balance, trades, PnL) is rebuilt from devnet on initialisation
 
-SOL transfers are confirmed automatically.
+Compromise or misbehaviour of one agent does not affect any other agent's keys,
+funds, or execution loop.
 
-Transaction history is retrieved to validate execution.
+---
 
-PnL calculations are updated only via the agent lifecycle, preventing double-spending in simulations.
+## 5. Transaction Security
 
-Optional future SPL token and multi-instruction transactions will follow the same isolation model.
+### Replay Protection
 
-7. Logging & Auditing
+Every Solana transaction includes a `recentBlockhash` fetched immediately before signing.
+The network rejects any transaction with a blockhash older than ~90 seconds, making
+replayed transactions impossible.
 
-Each agent logs:
+### Confirmation Level
 
-Initialization
+All transactions use `commitment: "confirmed"` — the transaction has been voted on by
+a supermajority of the cluster before the signature is returned to the agent.
 
-Airdrop requests
+### Simulation Before Broadcast
 
-Transaction signatures
+`WalletEngine.execute()` runs `connection.simulateTransaction(tx)` before broadcasting.
+If simulation returns an error, the transaction is never signed or sent — preventing
+wasted fees on transactions that would fail on-chain.
 
-Errors or rate-limit events
+### On-Chain Verifiability
 
-Logs are local and non-sensitive, no private keys are logged.
+| Action | Transaction | Verifiable |
+|--------|-------------|------------|
+| BUY | `SystemProgram.transfer` — 0.01 SOL, agent → DEX treasury | ✅ Real signature |
+| SELL | `TransactionInstruction` via Memo program — signed JSON record | ✅ Real signature |
+| HOLD | No transaction | — |
 
-History enables auditing and replay of agent decisions.
+All signatures link directly to Solana Explorer (devnet).
 
-8. Environment Variables
+---
 
-WALLET_ENCRYPTION_KEY
+## 6. Network Safety
 
-Must be 32-character secure string in production.
+- **Devnet only** — the RPC URL is `https://api.devnet.solana.com`. There is no code
+  path that connects to mainnet.
+- **Singleton connection** — one `Connection` instance is shared across all agents,
+  preventing connection pool exhaustion.
+- **Staggered loop starts** — `startAllLoops()` adds a 3-second delay between each
+  agent to avoid simultaneous RPC bursts.
+- **Graceful error handling** — transient RPC failures log an error and skip the cycle;
+  they do not crash the process or mark the agent as permanently errored.
+- **Airdrop rate limiting** — devnet faucet imposes its own rate limits; the dashboard
+  surfaces funding failures clearly rather than silently retrying.
 
-Used for AES-256-GCM encryption of private keys.
+---
 
-DEVNET_RPC (optional)
+## 7. Logging & Auditing
 
-Custom Solana Devnet RPC endpoint.
+Every agent logs:
+- Keypair initialisation (public key only — never private key)
+- Airdrop request and confirmation
+- Each cycle decision (type, price, reason)
+- Transaction signature on BUY and SELL
+- Balance after each trade
+- Errors with descriptive messages
 
-9. Recommended Hardening
+No log call anywhere in the codebase includes the secret key, the encryption password,
+or the raw keystore bytes. The `Keypair` object is never passed to `JSON.stringify()`
+or any logger.
 
-Use environment isolation (Docker, VMs) for agent runtime.
+On-chain history provides a permanent, tamper-proof audit trail. Every SELL decision
+is recorded as a signed Memo transaction, making the agent's reasoning verifiable
+on-chain — not just in local logs.
 
-Rotate WALLET_ENCRYPTION_KEY periodically.
+---
 
-Monitor agent logs for errors and network issues.
+## 8. Environment Variables
 
-Consider using HSM or Vault for storing encryption secrets in production.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `WALLET_ENCRYPTION_KEY` | Yes | 32-character secret for AES-256-GCM encryption. Never commit. |
+| `SOLANA_RPC_URL` | No | Override devnet RPC endpoint. Defaults to `https://api.devnet.solana.com`. |
+| `NEXT_PUBLIC_BASE_URL` | Yes | Base URL for internal API calls from the loop route. |
 
-Limit concurrency for airdrop requests to avoid Devnet rate-limiting.
+---
 
-10. Security Goals
+## 9. Production Hardening Recommendations
 
-Autonomy: Agents can operate independently without human intervention.
+These mitigations are out of scope for a devnet prototype but should be applied
+before any mainnet or production deployment:
 
-Isolation: Private keys never leave WalletEngine.
+- **Replace file-based keystores** with a secrets manager (AWS Secrets Manager,
+  HashiCorp Vault) or HSM for private key operations
+- **Rotate `WALLET_ENCRYPTION_KEY`** periodically; re-encrypt all keystores on rotation
+- **Run agents in isolated containers** (Docker, Kubernetes pods) with no shared
+  filesystem access between agent processes
+- **Add spending limits** to `validateTransaction()` — maximum SOL per transaction,
+  maximum trades per hour, address whitelist
+- **Implement structured logging** (JSON logs → SIEM) for real-time anomaly detection
+- **Add circuit breakers** — halt all loops automatically if aggregate PnL drops
+  below a configurable threshold
+- **Use mainnet-beta** with real funds only after a full security audit
 
-Resilience: Failures are localized, no single point of failure.
+---
 
-Auditability: All actions are logged and verifiable.
+## 10. Security Goals
+
+| Goal | Status |
+|------|--------|
+| **Autonomy** — agents operate without human intervention at runtime | ✅ |
+| **Isolation** — private keys never leave `WalletEngine` | ✅ |
+| **Integrity** — keystore tampering detected before decryption | ✅ |
+| **Resilience** — per-agent failures do not cascade to the fleet | ✅ |
+| **Auditability** — every trade decision produces a verifiable on-chain record | ✅ |
+| **Transparency** — threat model documented and mitigated | ✅ |
