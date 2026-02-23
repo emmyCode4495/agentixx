@@ -43,8 +43,68 @@ Agents can execute three action types:
 | Action | On-chain behaviour | Explorer link |
 |--------|--------------------|---------------|
 | `BUY`  | Real `SystemProgram.transfer` — agent → DEX treasury (0.01 SOL) | ✅ Verifiable signature |
-| `SELL` | Real `TransactionInstruction` via Memo program — signs JSON trade record | ✅ Verifiable signature |
+| `SELL` | Real `TransactionInstruction` via Memo program — signs JSON trade record with full LLM reasoning | ✅ Verifiable signature |
 | `HOLD` | No transaction — decision recorded in agent history only | — |
+
+### 4. Price Oracle
+
+Agents fetch a **live SOL/USD price** from the **Pyth Network Hermes REST API**
+before every trade decision. No API key is required.
+
+- Feed ID: `0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d`
+- Endpoint: `https://hermes.pyth.network/v2/updates/price/latest`
+- Timeout: 5 seconds
+- Fallback: simulated price in the `$130–$210` range if Pyth is unreachable
+
+The price source (`"pyth"` or `"simulated"`) is recorded on every trade and
+included in the API response as `priceSource`.
+
+### 5. LLM Autonomous Decision Engine
+
+Each trade decision is made by **Groq's `llama-3.1-8b-instant`** model using
+live market context. The LLM receives:
+
+- Live SOL/USD price and confidence interval (from Pyth)
+- Agent's current SOL balance and tradeable amount (after fee reserve)
+- Total trade count and cumulative P&L
+- Price source (`pyth` or `simulated`)
+
+The model returns a structured JSON decision:
+
+```json
+{ "decision": "BUY" | "SELL" | "HOLD", "reason": "<1-2 sentences>" }
+```
+
+If `GROQ_API_KEY` is not set, or if the Groq endpoint fails, the agent
+automatically falls back to the **rule-based strategy** (see below). The
+`decisionSource` field in the trade response indicates which path was taken:
+`"llm"` or `"rule-based"`.
+
+### 6. Rule-Based Fallback Strategy
+
+When the LLM is unavailable, agents fall back to a deterministic momentum strategy:
+
+```
+price < $150  AND balance ≥ 0.06 SOL  →  BUY   (undervalued signal)
+price > $200                           →  SELL  (take-profit signal)
+otherwise                              →  HOLD
+```
+
+This fallback is also used as the baseline to verify LLM behaviour — if the
+agent consistently HOLDs near current SOL prices (~$170–$190), the LLM and
+fallback are in agreement, not broken.
+
+---
+
+## Wallet Funding
+
+Agents are funded automatically on first boot from a **master wallet** defined
+in `.env.local` as `MASTER_WALLET` (a JSON array of 64 bytes).
+
+- Each agent receives **1 SOL** from the master wallet if its balance is below 1 SOL
+- The master wallet must hold at least **1.05 SOL** before boot or initialization will fail
+- If auto-funding fails, the agent falls back to `"idle"` status and logs the reason
+- Manual top-up is available via `POST /api/agents/:id/airdrop`
 
 ---
 
@@ -64,20 +124,28 @@ Response:
 {
   "ok": true,
   "initialized": true,
+  "initializing": false,
   "agents": [
     {
       "id": "alpha-trader",
       "publicKey": "9WzDXwBb...",
-      "status": "running",
+      "status": "idle",
       "balanceSOL": 0.9412,
       "tradeCount": 7,
       "pnl": -0.02,
+      "lastTrade": { ... },
       "lastUpdated": "2026-02-19T12:00:00Z",
+      "error": null,
       "explorerUrl": "https://explorer.solana.com/address/9WzDXwBb...?cluster=devnet"
     }
   ]
 }
 ```
+
+Notes:
+- `initialized` and `initializing` flags indicate boot state
+- `lastTrade` is the most recent `TradeRecord` or `null`
+- Balances are refreshed from devnet RPC on every GET call
 
 ### Execute a trade
 
@@ -85,7 +153,10 @@ Response:
 POST /api/agents/:id/trade
 Content-Type: application/json
 
-{ "type": "BUY" | "SELL" | "HOLD" }
+{}                         ← fully autonomous: LLM picks type + reason
+{ "type": "BUY" }         ← manual override: forces type, LLM still writes reason
+{ "type": "SELL" }
+{ "type": "HOLD" }
 ```
 
 Response:
@@ -97,13 +168,42 @@ Response:
     "id": "alpha-trader-1708340400000",
     "type": "BUY",
     "amountSOL": 0.01,
-    "price": 34.72,
+    "price": 172.45,
     "signature": "4xK9mP2...zW2p",
     "timestamp": "2026-02-19T12:00:00Z",
-    "reason": "Price 34.72 below momentum threshold — entering position"
+    "reason": "SOL is trading below recent averages with moderate confidence — entering small position"
   },
   "newBalanceSOL": 0.9312,
+  "priceSource": "pyth",
+  "decisionSource": "llm",
   "explorerUrl": "https://explorer.solana.com/tx/4xK9mP2...zW2p?cluster=devnet"
+}
+```
+
+Key response fields:
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `priceSource` | `"pyth"` \| `"simulated"` | Whether live Pyth data was used |
+| `decisionSource` | `"llm"` \| `"rule-based"` | Whether Groq LLM made the call |
+| `explorerUrl` | URL or `null` | Present for BUY and SELL; null for HOLD |
+
+For **manual overrides**, the `reason` field is prefixed with `[Manual BUY/SELL/HOLD]`
+followed by the LLM's contextual reasoning for that market state.
+
+For **SELL** trades, the full decision context is recorded on-chain via a signed
+Memo instruction in this format:
+
+```json
+{
+  "action": "SELL",
+  "agent": "alpha-trader",
+  "price": "172.45",
+  "amt": 0.01,
+  "src": "pyth",
+  "decision": "llm",
+  "reason": "...",
+  "ts": "2026-02-19T12:00:00Z"
 }
 ```
 
@@ -118,9 +218,10 @@ Content-Type: application/json
 
 When started, the loop fires every **15 seconds**. Each tick:
 1. Checks live balance — halts if below `MIN_BALANCE_SOL = 0.05`
-2. Reads price from `getMarketState()`
-3. Calls `agent.strategy(market, balance)` — the AI decision layer
-4. Executes the resulting BUY / SELL / HOLD via the trade route
+2. Fetches live SOL/USD price from Pyth Network
+3. Calls `getLLMDecision()` with full market + agent context
+4. Falls back to `getRuleBasedDecision()` if Groq is unavailable
+5. Executes the resulting BUY / SELL / HOLD via the trade route
 
 ### Request airdrop
 
@@ -151,10 +252,10 @@ initialize → fund → idle → running → idle → ...
 
 | Status | Meaning |
 |--------|---------|
-| `initializing` | Keypair being generated, keystore being written |
-| `funded` | Airdrop confirmed, agent ready to trade |
+| `initializing` | Keypair being generated, keystore being written, master wallet funding in progress |
+| `funded` | Master wallet transfer confirmed, agent ready to trade |
 | `running` | Currently executing a trade cycle |
-| `idle` | Loop paused — balance too low or loop stopped manually |
+| `idle` | Loop paused — balance too low, loop stopped manually, or funding failed gracefully |
 | `error` | Unrecoverable failure — check `agent.error` field |
 
 Agents transition automatically between `running` and `idle`.
@@ -164,36 +265,47 @@ Only `error` requires manual intervention (airdrop + loop restart).
 
 ## Strategy Interface
 
-All agents extend `BaseAgent` and implement `strategy()`:
+All agents extend `BaseAgent` and implement `decide()`:
 
 ```ts
 export interface MarketState {
-  price:      number   // simulated asset price (20–100 range)
-  volume?:    number
+  price:      number    // live SOL/USD from Pyth, or simulated fallback
+  confidence: number    // Pyth confidence interval in USD
+  source:     "pyth" | "simulated"
   timestamp?: string
 }
 
 export interface TradeDecision {
   type:   "BUY" | "SELL" | "HOLD"
-  reason: string       // human-readable explanation logged on-chain for SELL
+  reason: string        // written by LLM or rule engine; logged on-chain for SELL
+  source: "llm" | "rule-based"
 }
 
 export abstract class BaseAgent {
-  abstract strategy(market: MarketState, balanceSOL: number): TradeDecision
+  abstract decide(): Promise<void>
 }
 ```
 
-### Default strategy (TraderAgent — momentum rules)
+### LLM strategy (default — all agents)
+
+The default strategy sends live market context to Groq and parses a structured
+JSON response. Key constraints enforced in the prompt:
 
 ```
-price < 40  →  BUY   (undervalued signal)
-price > 70  →  SELL  (take-profit signal)
-otherwise   →  HOLD
+BUY costs exactly 0.01 SOL
+Agent cannot BUY if (balance - 0.05 reserve) < 0.01
+Agent reasons only from provided data — no hallucinated trends
 ```
 
-To replace with an LLM-driven strategy, implement `strategy()` with an
-API call to OpenAI, Anthropic, or any inference endpoint. The wallet
-execution layer beneath it stays identical.
+### Rule-based fallback strategy
+
+```
+price < $150  AND balance ≥ 0.06 SOL  →  BUY
+price > $200                           →  SELL
+otherwise                              →  HOLD
+```
+
+Activated automatically when `GROQ_API_KEY` is absent or Groq returns an error.
 
 ---
 
@@ -207,6 +319,7 @@ Agents operate within strict boundaries enforced by `WalletEngine`:
 - **Minimum reserve** — agents halt when balance drops below `0.05 SOL`
 - **Per-agent isolation** — no agent can read or modify another agent's keystore
 - **No plaintext logging** — keypairs are excluded from all log output and JSON serialisation
+- **Master wallet isolation** — master keypair is used only for initial funding transfers and is never stored in agent state
 
 Encryption spec:
 
@@ -220,18 +333,53 @@ Auth tag  : 16 bytes — detects any tampering before decryption
 
 ---
 
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MASTER_WALLET` | ✅ | JSON array of 64 bytes — master Solana keypair for agent funding |
+| `GROQ_API_KEY` | ⚠️ | Groq API key for LLM decisions. Falls back to rule-based if absent |
+
+Without `MASTER_WALLET`, agents cannot be funded on boot and will start in `"idle"` state.
+Without `GROQ_API_KEY`, agents still trade but use the rule-based fallback exclusively.
+
+---
+
 ## Agent IDs
 
 The following agent IDs are registered in the current fleet:
 
 | ID | Strategy |
 |----|----------|
-| `alpha-trader` | Momentum (TraderAgent) |
-| `beta-hodler` | Momentum (TraderAgent) |
-| `gamma-arbitrage` | Momentum (TraderAgent) |
+| `alpha-trader` | LLM (Groq llama-3.1-8b-instant) + rule-based fallback |
+| `beta-hodler` | LLM (Groq llama-3.1-8b-instant) + rule-based fallback |
+| `gamma-arbitrage` | LLM (Groq llama-3.1-8b-instant) + rule-based fallback |
 
 To add a new agent, register its ID in `lib/agentStore.ts` and add a
 `case` to `lib/agents/registry.ts`.
+
+---
+
+## Verifying LLM Communication
+
+To confirm Groq is being reached and not falling back silently, check the following:
+
+**Server logs** — one of these lines will appear on every trade:
+```
+[Groq] alpha-trader → BUY: <reason>        ← LLM reached successfully
+[LLM] GROQ_API_KEY not set — rule-based fallback
+[Groq] Failed (Groq HTTP 401: ...) — rule-based fallback
+```
+
+**Trade response** — the `decisionSource` field confirms the path taken:
+```json
+{ "decisionSource": "llm" }       ← Groq responded
+{ "decisionSource": "rule-based" } ← fallback was used
+```
+
+**Why HOLD is the most common decision** — SOL currently trades around $170–$190,
+which sits between the rule-based BUY threshold ($150) and SELL threshold ($200).
+The LLM mirrors this neutral stance. This is expected behaviour, not a bug.
 
 ---
 
@@ -240,4 +388,5 @@ To add a new agent, register its ID in `lib/agentStore.ts` and add a
 - RPC endpoint: `https://api.devnet.solana.com`
 - Airdrop limit: 1 SOL per request, rate-limited by the network
 - Blockhash expiry: ~90 seconds — agents fetch a fresh blockhash per transaction
+- Master wallet top-up: `https://faucet.solana.com` (use master wallet public key)
 - All signatures verifiable at: `https://explorer.solana.com/?cluster=devnet`

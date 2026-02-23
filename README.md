@@ -15,11 +15,13 @@ Agentixx is a framework for **agentic wallets** — wallets designed specificall
 
 - Generates its own **real ed25519 keypair** on startup
 - Stores its private key in an **AES-256-GCM encrypted keystore**
-- Funds itself via **Solana devnet airdrops**
+- Is funded automatically from a **master wallet** on first boot
+- Fetches a **live SOL/USD price** from the **Pyth Network** oracle before every trade
+- Makes **real AI trading decisions** via **Groq's `llama-3.1-8b-instant`** model
 - Runs an **autonomous decision loop** that signs and broadcasts real on-chain transactions every 15 seconds
 - Maintains **fully isolated state** — no agent can access another's keys or balance
 
-Every BUY produces a real SOL transfer. Every SELL produces a signed Memo program transaction. Every signature is verifiable on [Solana Explorer (devnet)](https://explorer.solana.com/?cluster=devnet).
+Every BUY produces a real SOL transfer. Every SELL produces a signed Memo program transaction with the full LLM reasoning recorded on-chain. Every signature is verifiable on [Solana Explorer (devnet)](https://explorer.solana.com/?cluster=devnet).
 
 ---
 
@@ -42,7 +44,7 @@ agentixx/
 │   │   └── agents/
 │   │       ├── route.ts                  # GET  — agent state + initialization
 │   │       └── [id]/
-│   │           ├── trade/route.ts        # POST — execute BUY / SELL / HOLD
+│   │           ├── trade/route.ts        # POST — LLM decision + BUY / SELL / HOLD
 │   │           ├── loop/route.ts         # POST — start / stop autonomous loop
 │   │           ├── airdrop/route.ts      # POST — request devnet SOL
 │   │           └── history/route.ts      # GET  — on-chain tx history
@@ -54,17 +56,17 @@ agentixx/
 │       ├── Navbar.tsx
 │       └── Footer.tsx
 ├── lib/
-│   ├── agentStore.ts                     # Runtime state — balances, trades, status
+│   ├── agentStore.ts                     # Runtime state — balances, trades, status, master wallet funding
 │   ├── solana.ts                         # Connection, sendSOL, sendMemoTransaction
 │   └── agents/
-│       ├── baseAgent.ts                  # Abstract agent — strategy() interface
-│       ├── traderAgent.ts                # Momentum-based trading strategy
+│       ├── baseAgent.ts                  # Abstract agent — decide() interface
+│       ├── traderAgent.ts                # LLM + rule-based fallback strategy
 │       ├── registry.ts                   # Agent factory — wires keypair → WalletEngine
 │       ├── loop.ts                       # Autonomous loop manager (globalThis singleton)
-│       └── market.ts                     # Simulated price oracle
+│       └── market.ts                     # Pyth Network price oracle + simulated fallback
 ├── wallet/
 │   └── engine.ts                         # WalletEngine — validate → simulate → execute
-├── SKILLS.md                             # Machine-readable API spec for AI agents
+├── SKILLS.md                             # Machine-readable API + agent spec
 ├── SECURITY.md                           # Threat model and key management policy
 └── .agent-keystore/                      # Auto-generated encrypted wallet files
 ```
@@ -73,7 +75,7 @@ agentixx/
 
 ## How It Works
 
-### 1. Wallet Creation
+### 1. Wallet Creation & Funding
 
 Each agent independently generates a keypair with no shared seed material:
 
@@ -88,30 +90,91 @@ The private key is immediately encrypted and never stored in plaintext:
 const { enc, iv, tag } = encryptKey(secretKeyHex, WALLET_ENCRYPTION_KEY)
 ```
 
-### 2. Autonomous Decision Loop
+On first boot, each agent is automatically funded with **1 SOL** transferred from a
+master wallet defined in `MASTER_WALLET` in `.env.local`. The master wallet must hold
+at least **1.05 SOL** or initialization will fail with a clear error message pointing
+to the devnet faucet.
+
+### 2. Live Price Oracle — Pyth Network
+
+Before every trade decision, agents fetch the live SOL/USD price from the
+**Pyth Network Hermes REST API** — no API key required:
+
+```ts
+// Feed: SOL/USD — same ID on mainnet and devnet via Hermes
+const url = `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${PYTH_SOL_FEED_ID}`
+```
+
+If Pyth is unreachable (timeout or error), agents fall back to a realistic simulated
+price in the `$130–$210` range. The `priceSource` field in every trade response
+indicates whether live (`"pyth"`) or simulated data was used.
+
+### 3. LLM Autonomous Decision Engine — Groq
+
+Every trade decision is made by **Groq's `llama-3.1-8b-instant`** model. The agent
+sends full market context to Groq and receives a structured JSON decision:
+
+```ts
+// Context sent to the LLM on every tick:
+{
+  price,        // live SOL/USD from Pyth
+  confidence,   // Pyth ± interval in USD
+  balanceSOL,   // current agent balance
+  tradeable,    // balance minus 0.05 SOL fee reserve
+  tradeCount,   // total trades executed
+  pnl           // cumulative profit/loss in SOL
+}
+
+// LLM responds with:
+{ "decision": "BUY" | "SELL" | "HOLD", "reason": "<1-2 sentences>" }
+```
+
+If `GROQ_API_KEY` is absent or Groq returns an error, agents automatically fall back
+to a deterministic rule-based strategy. The `decisionSource` field (`"llm"` or
+`"rule-based"`) in every trade response tells you which path was taken.
+
+### 4. Rule-Based Fallback Strategy
+
+```
+price < $150  AND balance ≥ 0.06 SOL  →  BUY
+price > $200                           →  SELL
+otherwise                              →  HOLD
+```
+
+### 5. Autonomous Decision Loop
 
 Every 15 seconds, each agent:
 
-1. Checks its live devnet balance (halts if below `0.05 SOL` reserve)
-2. Reads the price oracle via `getMarketState()`
-3. Runs `strategy(market, balance)` — the AI decision layer
-4. Executes the decision on-chain via `WalletEngine`
+1. Checks its live devnet balance — halts if below `0.05 SOL` reserve
+2. Fetches live SOL/USD price from Pyth Network
+3. Calls `getLLMDecision()` with full market and agent context
+4. Falls back to `getRuleBasedDecision()` if Groq is unavailable
+5. Executes the decision on-chain via `WalletEngine`
 
-```
-price < 40  →  BUY  (real SOL transfer to DEX treasury)
-price > 70  →  SELL (real Memo program tx — JSON trade record signed on-chain)
-otherwise   →  HOLD (decision recorded, no transaction)
-```
-
-### 3. On-Chain Execution
+### 6. On-Chain Execution
 
 | Action | Transaction type | Explorer link |
 |--------|-----------------|---------------|
-| BUY | `SystemProgram.transfer` — agent → DEX treasury | ✅ Real signature |
-| SELL | `TransactionInstruction` via Memo program — signs JSON metadata | ✅ Real signature |
+| BUY | `SystemProgram.transfer` — agent → DEX treasury (0.01 SOL) | ✅ Real signature |
+| SELL | `TransactionInstruction` via Memo program — full LLM decision signed on-chain | ✅ Real signature |
 | HOLD | No transaction | — |
 
-### 4. WalletEngine Safety Layer
+For SELL trades, the complete decision context is written permanently on-chain:
+
+```json
+{
+  "action": "SELL",
+  "agent": "alpha-trader",
+  "price": "172.45",
+  "amt": 0.01,
+  "src": "pyth",
+  "decision": "llm",
+  "reason": "...",
+  "ts": "2026-02-19T12:00:00Z"
+}
+```
+
+### 7. WalletEngine Safety Layer
 
 Every transaction passes through `WalletEngine.execute()`:
 
@@ -127,7 +190,8 @@ sendAndConfirmTransaction →  broadcast with `confirmed` commitment
 
 - **Node.js ≥ 20**
 - **npm**, **pnpm**, or **yarn**
-- A Solana devnet wallet (optional — agents self-fund via airdrop)
+- A funded Solana devnet master wallet (for agent auto-funding on boot)
+- A [Groq API key](https://console.groq.com) (free — for LLM trade decisions)
 
 ---
 
@@ -152,6 +216,16 @@ Edit `.env.local`:
 # Never commit this value to Git
 WALLET_ENCRYPTION_KEY=your-32-character-secret-here!!
 
+# Required — JSON array of 64 bytes representing your master Solana keypair
+# Used to auto-fund agent wallets on first boot (must hold ≥ 1.05 SOL on devnet)
+# Generate with: node -e "const {Keypair}=require('@solana/web3.js');console.log(JSON.stringify(Array.from(Keypair.generate().secretKey)))"
+# Fund at: https://faucet.solana.com
+MASTER_WALLET=[12,34,56,...] 
+
+# Required — Groq API key for LLM trade decisions (free at console.groq.com)
+# Without this, agents fall back to the rule-based strategy
+GROQ_API_KEY=gsk_...
+
 # Optional — override the default Solana devnet RPC
 SOLANA_RPC_URL=https://api.devnet.solana.com
 
@@ -173,10 +247,12 @@ On the first request to `/api/agents`, the server will:
 
 1. Generate keypairs for all configured agents
 2. Encrypt and persist keystores to `.agent-keystore/`
-3. Request devnet SOL airdrops for each agent
+3. Transfer 1 SOL to each agent from the master wallet
 4. Mark agents as `funded` and ready
 
-> **Note:** Devnet airdrops are rate-limited. If agents show 0 SOL balance, use the ⛽ button in the dashboard or fund manually via [faucet.solana.com](https://faucet.solana.com).
+> **Note:** The master wallet must hold at least 1.05 SOL on devnet before starting.
+> Top it up at [faucet.solana.com](https://faucet.solana.com) using its public key.
+> If agents show 0 SOL balance after boot, use the ⛽ button in the dashboard to trigger a manual airdrop.
 
 ---
 
@@ -185,8 +261,8 @@ On the first request to `/api/agents`, the server will:
 ### Agents
 
 ```
-GET  /api/agents                    → fleet status, balances, last trades
-POST /api/agents/:id/trade          → { type: "BUY" | "SELL" | "HOLD" }
+GET  /api/agents                    → fleet status, balances, last trades, decision sources
+POST /api/agents/:id/trade          → { type: "BUY" | "SELL" | "HOLD" } or {} for autonomous
 POST /api/agents/:id/loop           → { action: "start" | "stop" }
 GET  /api/agents/:id/loop           → loop status for agent
 POST /api/agents/:id/airdrop        → request 1 SOL devnet airdrop
@@ -209,12 +285,12 @@ curl -X POST http://localhost:3000/api/agents/alpha-trader/loop \
 }
 ```
 
-### Example — Manual trade
+### Example — Autonomous trade (LLM decides)
 
 ```bash
 curl -X POST http://localhost:3000/api/agents/alpha-trader/trade \
   -H "Content-Type: application/json" \
-  -d '{ "type": "BUY" }'
+  -d '{}'
 ```
 
 ```json
@@ -223,13 +299,27 @@ curl -X POST http://localhost:3000/api/agents/alpha-trader/trade \
   "trade": {
     "type": "BUY",
     "amountSOL": 0.01,
-    "price": 34.72,
-    "signature": "4xK9...zW2p"
+    "price": 172.45,
+    "signature": "4xK9...zW2p",
+    "reason": "SOL is trading below recent averages with moderate confidence — entering small position"
   },
-  "newBalanceSOL": 0.9821,
+  "newBalanceSOL": 0.9312,
+  "priceSource": "pyth",
+  "decisionSource": "llm",
   "explorerUrl": "https://explorer.solana.com/tx/4xK9...zW2p?cluster=devnet"
 }
 ```
+
+### Example — Manual trade override
+
+```bash
+curl -X POST http://localhost:3000/api/agents/alpha-trader/trade \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "BUY" }'
+```
+
+The trade type is forced to BUY, but the LLM still generates the contextual reason.
+The `reason` field will be prefixed with `[Manual BUY]`.
 
 ---
 
@@ -247,13 +337,39 @@ case "delta-scalper":
 
 ```ts
 export class ScalperAgent extends BaseAgent {
-  strategy(market: MarketState, balanceSOL: number): TradeDecision {
-    // implement your logic here
+  async decide(): Promise<void> {
+    // fetch price, call LLM or custom logic, execute trade
   }
 }
 ```
 
-To plug in an LLM, replace the body of `strategy()` with an OpenAI or Anthropic API call. The wallet layer beneath it stays identical.
+The LLM decision engine and wallet execution layer beneath it stay identical across all agents.
+
+---
+
+## Verifying LLM Communication
+
+Check your server terminal for these log lines on every trade:
+
+```
+[Pyth] SOL/USD = $172.45 ± $0.32          ← live price fetched
+[Groq] alpha-trader → HOLD: <reason>       ← LLM reached successfully
+```
+
+Or fallback indicators:
+
+```
+[LLM] GROQ_API_KEY not set — rule-based fallback
+[Groq] Failed (Groq HTTP 401) — rule-based fallback
+```
+
+The trade API response also exposes `decisionSource: "llm" | "rule-based"` so
+you can confirm the decision path without reading server logs.
+
+> **Why do agents often HOLD?** SOL currently trades around $170–$190, which sits
+> between the rule-based BUY threshold ($150) and SELL threshold ($200). The LLM
+> mirrors this neutral stance. This is expected behaviour — adjust thresholds in
+> the Groq prompt or rule-based fallback if you want more frequent activity.
 
 ---
 
@@ -268,6 +384,7 @@ To plug in an LLM, replace the body of `strategy()` with an OpenAI or Anthropic 
 | Cross-agent contamination | Independent keypairs — no shared key material |
 | Private key in logs | `toJSON()` never exports key; logger redacts sensitive fields |
 | Agent overspending | `MIN_BALANCE_SOL = 0.05` reserve enforced before every loop tick |
+| Master wallet exposure | Used only for initial funding transfers; never stored in agent state |
 | Simulated signatures | All BUY and SELL actions produce real, verifiable on-chain signatures |
 
 See [SECURITY.md](./SECURITY.md) for the full threat model.
@@ -281,15 +398,16 @@ See [SECURITY.md](./SECURITY.md) for the full threat model.
 | ✅ Create a wallet programmatically | `Keypair.generate()` in `lib/agentStore.ts` |
 | ✅ Sign transactions automatically | `WalletEngine.execute()` in `lib/wallet/engine.ts` |
 | ✅ Hold SOL or SPL tokens | Live devnet balances tracked per agent |
-| ✅ Interact with a test dApp or protocol | BUY → SOL transfer; SELL → Memo program tx |
+| ✅ Interact with a test dApp or protocol | BUY → SOL transfer; SELL → Memo program tx with on-chain LLM reasoning |
 | ✅ Deep dive (written) | [`/about`](/about) — wallet design, security, AI integration |
 | ✅ Open-source with README | This file + [github.com/emmyCode4495/agentixx](https://github.com/emmyCode4495/agentixx) |
 | ✅ Working prototype on devnet | Live dashboard at `/dashboard` |
-| ✅ Safe key management | AES-256-GCM + scrypt, GCM auth tag tamper detection |
+| ✅ Safe key management | AES-256-GCM + scrypt, GCM auth tag tamper detection, master wallet isolation |
 | ✅ Automated transaction signing | No human input at runtime — loop fires every 15s |
-| ✅ AI decision-making simulation | Momentum strategy in `TraderAgent.strategy()` |
+| ✅ Real AI decision-making | Groq `llama-3.1-8b-instant` with live Pyth price context |
+| ✅ Live price oracle | Pyth Network Hermes REST API — real SOL/USD feed, no API key required |
 | ✅ Multiple independent agents | `alpha-trader`, `beta-hodler`, `gamma-arbitrage` |
-| ✅ SKILLS.md | [`SKILLS.md`](./SKILLS.md) — machine-readable API spec |
+| ✅ SKILLS.md | [`SKILLS.md`](./SKILLS.md) — machine-readable API + agent spec |
 
 ---
 
@@ -298,6 +416,8 @@ See [SECURITY.md](./SECURITY.md) for the full threat model.
 - [Solana Devnet Explorer](https://explorer.solana.com/?cluster=devnet)
 - [Solana Devnet Faucet](https://faucet.solana.com)
 - [Solana Web3.js Docs](https://solana-labs.github.io/solana-web3.js/)
+- [Pyth Network Price Feeds](https://pyth.network/developers/price-feed-ids)
+- [Groq Console](https://console.groq.com)
 - [Project Deep Dive](/about)
 
 ---

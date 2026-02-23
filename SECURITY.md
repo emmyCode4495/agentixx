@@ -16,8 +16,12 @@ and production hardening recommendations.
 | Transaction replay | High | Solana blockhash expiry (~90 seconds per transaction) |
 | Cross-agent key contamination | High | Independent keypairs, isolated keystore files — no shared material |
 | Private key exposure in logs | High | `toJSON()` never exports key; all log calls exclude keypair fields |
+| Master wallet key exposure | High | Used only for initial funding transfers; never stored in agent state or logs |
 | Agent overspending / drain | Medium | `MIN_BALANCE_SOL = 0.05` reserve enforced before every loop tick |
+| LLM prompt injection | Medium | Structured JSON response parsing with strict type validation — unexpected values throw before execution |
+| Unverifiable trade decisions | Medium | SELL decisions record full LLM reasoning on-chain via signed Memo tx — permanently auditable |
 | Simulated / unverifiable trades | Medium | All BUY and SELL produce real on-chain signatures verifiable on Explorer |
+| External API unavailability | Low | Pyth and Groq failures handled gracefully — price falls back to simulated range, decisions fall back to rule-based strategy |
 | RPC request flooding | Low | Singleton connection, staggered loop starts, graceful error handling |
 | Mainnet fund exposure | Low | Hardcoded devnet RPC — no mainnet interaction possible |
 
@@ -36,6 +40,20 @@ const keypair = Keypair.generate()
 ```
 
 Compromise of one agent's key does **not** affect any other agent in the fleet.
+
+### Master Wallet
+
+A master wallet defined in `MASTER_WALLET` (`.env.local`) is used exclusively to
+fund agent wallets on first boot. Its keypair is:
+
+- Loaded once per boot cycle, used for funding transfers only
+- Never stored in agent state, the agent store, or any runtime variable
+- Never serialised or included in any API response or log output
+- Validated to hold at least **1.05 SOL** before any transfer is attempted —
+  failing fast with a clear error rather than silently under-funding agents
+
+The master wallet is a short-lived operational credential, not a long-term secret.
+It should be treated with the same care as `WALLET_ENCRYPTION_KEY`.
 
 ### Encryption at Rest
 
@@ -90,7 +108,9 @@ All blockchain interactions are funnelled through `WalletEngine` — agents neve
 the raw keypair or RPC connection directly.
 
 ```
-Agent strategy()
+Agent decide()
+    ↓
+getLLMDecision() / getRuleBasedDecision()   ← AI or deterministic trade decision
     ↓
 WalletEngine.execute(tx)
     ↓  validateTransaction(tx)   ← policy check (spending limits, address rules)
@@ -152,14 +172,43 @@ wasted fees on transactions that would fail on-chain.
 | Action | Transaction | Verifiable |
 |--------|-------------|------------|
 | BUY | `SystemProgram.transfer` — 0.01 SOL, agent → DEX treasury | ✅ Real signature |
-| SELL | `TransactionInstruction` via Memo program — signed JSON record | ✅ Real signature |
+| SELL | `TransactionInstruction` via Memo program — signed JSON record including LLM reasoning, price source, and decision source | ✅ Real signature |
 | HOLD | No transaction | — |
 
-All signatures link directly to Solana Explorer (devnet).
+All signatures link directly to Solana Explorer (devnet). SELL memos make the agent's
+full AI reasoning permanently auditable on-chain — not just in local logs.
 
 ---
 
-## 6. Network Safety
+## 6. External API Security
+
+### Pyth Network Price Oracle
+
+The live SOL/USD price is fetched from Pyth Network's public Hermes REST API:
+
+- No API key required — no credential exposure risk
+- Timeout enforced at **5 seconds** — hangs do not block the trade loop
+- Failed or invalid responses fall back to a simulated price range (`$130–$210`)
+- The `priceSource` field (`"pyth"` or `"simulated"`) is recorded on every trade,
+  making it auditable whether live data was used
+
+### Groq LLM Decision Engine
+
+Trade decisions are made by Groq's `llama-3.1-8b-instant` via its OpenAI-compatible API:
+
+- API key stored in `GROQ_API_KEY` environment variable — never hardcoded or logged
+- Timeout enforced at **12 seconds** — LLM hangs do not stall the agent
+- All LLM responses are strictly parsed — only `"BUY"`, `"SELL"`, or `"HOLD"` are
+  accepted; unexpected values throw before any trade is executed
+- Markdown code fences in responses are stripped before JSON parsing to prevent
+  format injection from influencing trade execution
+- On any Groq failure, the agent falls back to `getRuleBasedDecision()` —
+  LLM unavailability never results in a hung or errored agent
+- The `decisionSource` field (`"llm"` or `"rule-based"`) is recorded on every trade
+
+---
+
+## 7. Network Safety
 
 - **Devnet only** — the RPC URL is `https://api.devnet.solana.com`. There is no code
   path that connects to mainnet.
@@ -174,37 +223,44 @@ All signatures link directly to Solana Explorer (devnet).
 
 ---
 
-## 7. Logging & Auditing
+## 8. Logging & Auditing
 
 Every agent logs:
 - Keypair initialisation (public key only — never private key)
+- Master wallet funding transfer (recipient public key and amount only)
 - Airdrop request and confirmation
-- Each cycle decision (type, price, reason)
+- Live price fetch result from Pyth, including source and confidence interval
+- LLM decision from Groq, including decision type and reason
+- Fallback activation when Groq or Pyth is unavailable
+- Each cycle decision (type, price, reason, decision source, price source)
 - Transaction signature on BUY and SELL
 - Balance after each trade
 - Errors with descriptive messages
 
-No log call anywhere in the codebase includes the secret key, the encryption password,
-or the raw keystore bytes. The `Keypair` object is never passed to `JSON.stringify()`
-or any logger.
+No log call anywhere in the codebase includes the secret key, the master wallet key,
+the encryption password, the Groq API key, or the raw keystore bytes. The `Keypair`
+object is never passed to `JSON.stringify()` or any logger.
 
 On-chain history provides a permanent, tamper-proof audit trail. Every SELL decision
-is recorded as a signed Memo transaction, making the agent's reasoning verifiable
-on-chain — not just in local logs.
+is recorded as a signed Memo transaction containing the agent ID, live price, price
+source, decision source, and LLM reasoning — making the agent's decision-making fully
+verifiable on-chain, not just in local logs.
 
 ---
 
-## 8. Environment Variables
+## 9. Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `WALLET_ENCRYPTION_KEY` | Yes | 32-character secret for AES-256-GCM encryption. Never commit. |
+| `MASTER_WALLET` | Yes | JSON array of 64 bytes — master Solana keypair for agent funding on boot. Never commit. |
+| `GROQ_API_KEY` | Recommended | Groq API key for LLM trade decisions. Agents fall back to rule-based strategy if absent. |
 | `SOLANA_RPC_URL` | No | Override devnet RPC endpoint. Defaults to `https://api.devnet.solana.com`. |
 | `NEXT_PUBLIC_BASE_URL` | Yes | Base URL for internal API calls from the loop route. |
 
 ---
 
-## 9. Production Hardening Recommendations
+## 10. Production Hardening Recommendations
 
 These mitigations are out of scope for a devnet prototype but should be applied
 before any mainnet or production deployment:
@@ -212,18 +268,24 @@ before any mainnet or production deployment:
 - **Replace file-based keystores** with a secrets manager (AWS Secrets Manager,
   HashiCorp Vault) or HSM for private key operations
 - **Rotate `WALLET_ENCRYPTION_KEY`** periodically; re-encrypt all keystores on rotation
+- **Rotate `MASTER_WALLET`** after initial fleet funding — it serves no further purpose
+  and should be decommissioned to reduce the attack surface
 - **Run agents in isolated containers** (Docker, Kubernetes pods) with no shared
   filesystem access between agent processes
 - **Add spending limits** to `validateTransaction()` — maximum SOL per transaction,
   maximum trades per hour, address whitelist
+- **Implement LLM output validation** beyond type checking — rate-limit BUY decisions,
+  flag unusual reasoning patterns, and alert on repeated identical reasons
 - **Implement structured logging** (JSON logs → SIEM) for real-time anomaly detection
 - **Add circuit breakers** — halt all loops automatically if aggregate PnL drops
   below a configurable threshold
+- **Validate Pyth price bounds** — reject prices outside a reasonable range (e.g. < $10
+  or > $10,000) before passing to the LLM to prevent outlier data driving bad decisions
 - **Use mainnet-beta** with real funds only after a full security audit
 
 ---
 
-## 10. Security Goals
+## 11. Security Goals
 
 | Goal | Status |
 |------|--------|
@@ -233,3 +295,6 @@ before any mainnet or production deployment:
 | **Resilience** — per-agent failures do not cascade to the fleet | ✅ |
 | **Auditability** — every trade decision produces a verifiable on-chain record | ✅ |
 | **Transparency** — threat model documented and mitigated | ✅ |
+| **LLM safety** — invalid or injected LLM outputs rejected before execution | ✅ |
+| **Oracle safety** — price feed failures handled gracefully with auditable fallback | ✅ |
+| **Master wallet isolation** — funding credential never persisted in agent state | ✅ |
