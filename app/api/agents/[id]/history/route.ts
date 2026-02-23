@@ -1,8 +1,3 @@
-/**
- * GET /api/agents/[id]/history
- * Fetches the REAL on-chain transaction history for an agent
- * directly from Solana devnet RPC.
- */
 
 import { NextRequest, NextResponse } from "next/server"
 import { getAgent, isInitialized } from "@/lib/agentStore"

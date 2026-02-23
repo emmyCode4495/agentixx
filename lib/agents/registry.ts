@@ -1,7 +1,4 @@
-/**
- * lib/agents/registry.ts
- * Builds agent instances with their WalletEngine pre-wired from agentStore.
- */
+
 
 import { WalletEngine } from "../wallet/engine"
 import { TraderAgent } from "./traderAgent"

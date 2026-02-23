@@ -1,8 +1,4 @@
-/**
- * gamma-arbitrage strategy: Aggressive
- * Trades frequently on small signals. Higher risk, higher activity.
- * Takes any directional signal, even weak ones.
- */
+
 
 import type { MarketState } from "./market"
 import type { TradeType } from "../agentStore"

@@ -1,9 +1,3 @@
-/**
- * lib/solana.ts
- * Core Solana devnet connection and wallet utilities.
- * All agents share one Connection instance (server-side singleton).
- */
-
 import {
   Connection,
   Keypair,

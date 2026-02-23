@@ -1,6 +1,3 @@
-/**
- * lib/agents/baseAgent.ts
- */
 
 import { WalletEngine } from "../wallet/engine"
 

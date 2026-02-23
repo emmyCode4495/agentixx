@@ -1,9 +1,3 @@
-/**
- * lib/agentStore.ts
- * Central state + runtime controller for all agents.
- * Wallet execution is separated via WalletEngine.
- */
-
 import { getBalanceSOL } from "./solana"
 import { createAgentWallet } from "./wallet/factory"
 import { WalletEngine } from "./wallet/engine"

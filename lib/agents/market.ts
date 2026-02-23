@@ -1,11 +1,4 @@
-/**
- * lib/agents/market.ts
- * Simulated market price feed.
- * In production, replace with Pyth or Switchboard oracle.
- *
- * Generates a realistic price series with trend, volatility,
- * and mean-reversion so agent strategies have something to react to.
- */
+
 
 export interface MarketState {
   price: number          // current simulated token price (USD)

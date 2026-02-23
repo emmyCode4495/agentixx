@@ -1,8 +1,4 @@
-/**
- * beta-hodler strategy: Conservative
- * Only trades on very strong signals. Mostly HOLDs.
- * Prioritises capital preservation — never trades in high volatility.
- */
+
 
 import type { MarketState } from "./market"
 import type { TradeType } from "../agentStore"

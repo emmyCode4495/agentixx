@@ -1,12 +1,3 @@
-/**
- * POST /api/agents/[id]/loop
- * Body: { action: "start" | "stop" }
- *
- * Start or stop an individual agent's autonomous trading loop.
- * The loop itself lives in lib/agents/loop.ts — this route is just
- * the HTTP interface to start/stop it. Decision logic, signing, and
- * on-chain execution all happen inside runCycle() in the loop module.
- */
 import { NextRequest, NextResponse } from "next/server"
 import { getAgent, isInitialized } from "@/lib/agentStore"
 import { startAgentLoop, stopAgentLoop, getRunningLoops } from "@/lib/agents/loop"

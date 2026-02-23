@@ -1,8 +1,4 @@
-/**
- * alpha-trader strategy: Momentum
- * Follows price trends — buys into upward momentum, sells into downturns.
- * Moderate trade frequency, medium-sized positions.
- */
+
 
 import type { MarketState } from "./market"
 import type { TradeType } from "../agentStore"

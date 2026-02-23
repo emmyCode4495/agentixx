@@ -1,10 +1,3 @@
-/**
- * lib/wallet/engine.ts
- * Core wallet execution layer for each agent.
- * Wraps a Keypair and Connection, validates policy, simulates,
- * then broadcasts transactions on Solana devnet.
- */
-
 import {
   Keypair,
   Connection,

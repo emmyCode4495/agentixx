@@ -1,9 +1,3 @@
-/**
- * POST /api/agents/[id]/airdrop
- * Funds an agent wallet from a central master devnet wallet.
- * Master wallet secret key is stored in MASTER_WALLET env var
- * as a JSON array of bytes, e.g: [1,2,3,...,64 numbers total]
- */
 
 import { NextRequest, NextResponse } from "next/server"
 import { getAgent, refreshBalance, isInitialized } from "@/lib/agentStore"

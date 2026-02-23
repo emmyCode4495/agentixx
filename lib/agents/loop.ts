@@ -1,13 +1,3 @@
-/**
- * lib/agents/loop.ts
- * Autonomous loop manager.
- * Each agent runs its own independent interval — reads market state,
- * applies its strategy, and executes real on-chain transactions.
- *
- * BUY  → real SOL transfer: agent → DEX treasury (SystemProgram.transfer)
- * SELL → real Memo program tx: agent signs JSON trade record on-chain
- * HOLD → no transaction, decision recorded in agent history only
- */
 
 import { getConnection, sendSOL, sendMemoTransaction } from "../solana"
 import { getMarketState } from "./market"
