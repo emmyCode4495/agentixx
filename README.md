@@ -418,7 +418,6 @@ See [SECURITY.md](./SECURITY.md) for the full threat model.
 - [Solana Web3.js Docs](https://solana-labs.github.io/solana-web3.js/)
 - [Pyth Network Price Feeds](https://pyth.network/developers/price-feed-ids)
 - [Groq Console](https://console.groq.com)
-- [Project Deep Dive](/about)
 
 ---
 
