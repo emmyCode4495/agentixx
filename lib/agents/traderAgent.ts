@@ -16,7 +16,7 @@ export class TraderAgent extends BaseAgent {
     super(id, wallet, 15_000)
   }
 
-  strategy(market: MarketState, balanceSOL: number): TradeDecision {
+  strategy(market: MarketState, _balanceSOL: number): TradeDecision {
     const { price } = market
 
     if (price < 40) {

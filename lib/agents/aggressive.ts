@@ -5,7 +5,7 @@ import type { TradeType } from "../agentStore"
 import type { Decision } from "./momentum"
 
 export function aggressiveStrategy(market: MarketState, balanceSOL: number): Decision {
-  const { price, priceChange1m, priceChange5m, trend, volatility } = market
+  const { price, priceChange1m, trend, volatility } = market
 
   if (balanceSOL < 0.03) {
     return { type: "HOLD", reason: "Balance critically low — gamma-arbitrage pausing", confidence: 1 }

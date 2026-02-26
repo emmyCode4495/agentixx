@@ -1,7 +1,6 @@
 
 
 import type { MarketState } from "./market"
-import type { TradeType } from "../agentStore"
 import type { Decision } from "./momentum"
 
 export function conservativeStrategy(market: MarketState, balanceSOL: number): Decision {

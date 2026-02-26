@@ -3,7 +3,7 @@ import {
   getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token"
-import { PublicKey, Transaction } from "@solana/web3.js"
+import { PublicKey } from "@solana/web3.js"
 
 export async function createATAInstruction(
   mint: PublicKey,

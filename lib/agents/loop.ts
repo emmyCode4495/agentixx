@@ -1,5 +1,5 @@
 
-import { getConnection, sendSOL, sendMemoTransaction } from "../solana"
+import { sendSOL, sendMemoTransaction } from "../solana"
 import { getMarketState } from "./market"
 import { createAgentInstance } from "./registry"
 import {
