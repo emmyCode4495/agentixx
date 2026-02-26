@@ -3,25 +3,25 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: {
-    default: "My Next App",
-    template: "%s · My Next App",
+    default: "Agentixx",
+    template: "%s · Agentixx",
   },
-  description: "A modern Next.js application.",
+  description: "Solana autonomous agent framework.",
   keywords: ["Next.js", "React", "TypeScript"],
-  authors: [{ name: "Your Name" }],
-  creator: "Your Name",
+  authors: [{ name: "#emmyCode" }],
+  creator: "#emmyCode",
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   openGraph: {
     type: "website",
     locale: "en_US",
-    title: "My Next App",
-    description: "A modern Next.js application.",
-    siteName: "My Next App",
+    title: "Agentixx",
+    description: "Solana autonomous agent framework.",
+    siteName: "Agentixx",
   },
   twitter: {
     card: "summary_large_image",
-    title: "My Next App",
-    description: "A modern Next.js application.",
+    title: "Agentixx",
+    description: "Solana autonomous agent framework.",
   },
   robots: {
     index: true,

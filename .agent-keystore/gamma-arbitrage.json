@@ -1,8 +1,8 @@
 {
   "agentId": "gamma-arbitrage",
-  "publicKey": "4kHwAZcG5r43osEYHmvfXuGChDEGxjrUYcdA1Wmwd8TL",
-  "enc": "d1615ec3668a1f5d76bbf43bb01b656df2ec90b83124b393fc1487df61e38be6779405f2a1f0bc2f38a43ee8c8ae9c2f3d29337b250b4b44b94c95033da433f2dca290792f41202fadf9061b2c21c1a053ad5c9cb56b0b91fd907d06e920ef30bcaac249b8fe1c639d8e7d091a3debc7ae9dc913ab3c5149fd8df0009b77c358",
-  "iv": "817b9cb9bd1aea0a04abf094",
-  "tag": "ea2798c6ab1416cfb72e970f17b05a35",
-  "createdAt": "2026-02-23T12:21:14.218Z"
+  "publicKey": "EAZg2bcDNvy5gBHHf31LqefHKtjamVKbzDSfm7XW5dAt",
+  "enc": "410af8a9999ad009a8d6a091e853997f47f61862af328d36b213b31d75ed05e3be0b0461efceaa20433f8941b56fb1e59eb070d52d54bb6817be2bca7cf762fd406237f5d3abc61df90de5c45b53bb559f123e146faaeb84b04fa7358297534260cacc2d4b91c7be12c06de1a2485f8673574afd154773ffb20d2030c5cb0d06",
+  "iv": "6de8320ea5ddcefdea08d026",
+  "tag": "8a728f28a600511fef1ed9d3fa45cf1d",
+  "createdAt": "2026-02-26T09:25:22.440Z"
 }

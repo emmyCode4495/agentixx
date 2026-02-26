@@ -1,8 +1,8 @@
 {
   "agentId": "alpha-trader",
-  "publicKey": "Hi1ompk3PTaneAApfU8sg7eefsWEZNNhStQ2oVjB3VwA",
-  "enc": "2b0393bf1fe24baa35155dad83ac8a212671921da8778428a7c9ecf0afdc83ab152c90fbb6393b6c45d7ba6b66db2fcbc7df92d6d19cd7cf85e0debebaaa78ab2a45a7995fc69dfe628f0e30cb6037fed446b2507089a7495699204f94eaed60c23868ec25dbbeb238b3897ae2fda606e0cd5b77f184441a0d954a3add8663bf",
-  "iv": "6b6aba0f396479b444d715ab",
-  "tag": "849cb23cdcbd37da442fb7c64f332c22",
-  "createdAt": "2026-02-23T12:21:09.019Z"
+  "publicKey": "9RP6KVVQXmaZTXNrjnRAWRkseQns8U4W1feUQaimP699",
+  "enc": "21775d80930d681d0377c7d7ef09e44710d6cd350828138bebb469c53e2d08bc752a6e72967962afa23211806cbc681de802a39fe090aab837407f2b3b2271ee4544757cf23f69cffc4cda74bd66185e14aaa6e319edbcf53551b27339c45230309ad7ceca63e4c1e78053cb7087c6f6574595587d7962713f819bd395ab1885",
+  "iv": "954a1d5c68040c84dd9a9ed1",
+  "tag": "6e3f35d9e47de81434c662f392cdcc6f",
+  "createdAt": "2026-02-26T09:25:14.527Z"
 }
