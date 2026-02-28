@@ -1,13 +1,3 @@
-/**
- * lib/agents/traderAgent.ts
- * Momentum-based trading agent.
- *
- * Decision rules:
- *   price < 40  → BUY  (undervalued)
- *   price > 70  → SELL (take profit)
- *   otherwise   → HOLD
- */
-
 import { WalletEngine } from "../wallet/engine"
 import { BaseAgent, MarketState, TradeDecision } from "./baseAgent"
 

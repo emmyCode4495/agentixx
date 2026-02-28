@@ -19,6 +19,7 @@ Agentixx is a framework for **agentic wallets** — wallets designed specificall
 - Fetches a **live SOL/USD price** from the **Pyth Network** oracle before every trade
 - Makes **real AI trading decisions** via **Groq's `llama-3.1-8b-instant`** model
 - Runs an **autonomous decision loop** that signs and broadcasts real on-chain transactions every 15 seconds
+- Persists all agent state to **Upstash Redis** — fully compatible with Vercel's serverless architecture
 - Maintains **fully isolated state** — no agent can access another's keys or balance
 
 Every BUY produces a real SOL transfer. Every SELL produces a signed Memo program transaction with the full LLM reasoning recorded on-chain. Every signature is verifiable on [Solana Explorer (devnet)](https://explorer.solana.com/?cluster=devnet).
@@ -46,7 +47,9 @@ agentixx/
 │   │       └── [id]/
 │   │           ├── trade/route.ts        # POST — LLM decision + BUY / SELL / HOLD
 │   │           ├── loop/route.ts         # POST — start / stop autonomous loop
-│   │           ├── airdrop/route.ts      # POST — request devnet SOL
+│   │           ├── airdrop/route.ts      # POST — master wallet funding
+│   │           ├── faucet/route.ts       # POST — devnet faucet airdrop
+│   │           ├── execute/route.ts      # POST — trigger autonomous cycle
 │   │           └── history/route.ts      # GET  — on-chain tx history
 │   ├── dashboard/page.tsx                # Live dashboard UI
 │   ├── about/page.tsx                    # Deep dive writeup
@@ -56,7 +59,7 @@ agentixx/
 │       ├── Navbar.tsx
 │       └── Footer.tsx
 ├── lib/
-│   ├── agentStore.ts                     # Runtime state — balances, trades, status, master wallet funding
+│   ├── agentStore.ts                     # Persistent agent state via Upstash Redis (KV)
 │   ├── solana.ts                         # Connection, sendSOL, sendMemoTransaction
 │   └── agents/
 │       ├── baseAgent.ts                  # Abstract agent — decide() interface
@@ -95,7 +98,18 @@ master wallet defined in `MASTER_WALLET` in `.env.local`. The master wallet must
 at least **1.05 SOL** or initialization will fail with a clear error message pointing
 to the devnet faucet.
 
-### 2. Live Price Oracle — Pyth Network
+### 2. Persistent State — Upstash Redis
+
+Agent state (balances, trade history, status, P&L) is persisted to **Upstash Redis** via the `@upstash/redis` package. This makes Agentixx fully compatible with **Vercel's serverless architecture** — state survives across cold starts, re-deployments, and concurrent function invocations.
+
+A distributed lock (`SET NX`) prevents race conditions when multiple serverless instances try to initialize agents simultaneously.
+
+```ts
+// Only the first function instance proceeds — others wait
+const lock = await kv.set("agents:init:lock", "1", { nx: true, ex: 120 })
+```
+
+### 3. Live Price Oracle — Pyth Network
 
 Before every trade decision, agents fetch the live SOL/USD price from the
 **Pyth Network Hermes REST API** — no API key required:
@@ -109,10 +123,11 @@ If Pyth is unreachable (timeout or error), agents fall back to a realistic simul
 price in the `$130–$210` range. The `priceSource` field in every trade response
 indicates whether live (`"pyth"`) or simulated data was used.
 
-### 3. LLM Autonomous Decision Engine — Groq
+### 4. LLM Autonomous Decision Engine — Groq
 
-Every trade decision is made by **Groq's `llama-3.1-8b-instant`** model. The agent
-sends full market context to Groq and receives a structured JSON decision:
+Every trade decision is made by **Groq's `llama-3.1-8b-instant`** model via the
+OpenAI-compatible API. The agent sends full market context to Groq and receives a
+structured JSON decision:
 
 ```ts
 // Context sent to the LLM on every tick:
@@ -133,7 +148,7 @@ If `GROQ_API_KEY` is absent or Groq returns an error, agents automatically fall 
 to a deterministic rule-based strategy. The `decisionSource` field (`"llm"` or
 `"rule-based"`) in every trade response tells you which path was taken.
 
-### 4. Rule-Based Fallback Strategy
+### 5. Rule-Based Fallback Strategy
 
 ```
 price < $150  AND balance ≥ 0.06 SOL  →  BUY
@@ -141,7 +156,7 @@ price > $200                           →  SELL
 otherwise                              →  HOLD
 ```
 
-### 5. Autonomous Decision Loop
+### 6. Autonomous Decision Loop
 
 Every 15 seconds, each agent:
 
@@ -150,8 +165,9 @@ Every 15 seconds, each agent:
 3. Calls `getLLMDecision()` with full market and agent context
 4. Falls back to `getRuleBasedDecision()` if Groq is unavailable
 5. Executes the decision on-chain via `WalletEngine`
+6. Persists the updated trade record and balance to Upstash Redis
 
-### 6. On-Chain Execution
+### 7. On-Chain Execution
 
 | Action | Transaction type | Explorer link |
 |--------|-----------------|---------------|
@@ -174,7 +190,7 @@ For SELL trades, the complete decision context is written permanently on-chain:
 }
 ```
 
-### 7. WalletEngine Safety Layer
+### 8. WalletEngine Safety Layer
 
 Every transaction passes through `WalletEngine.execute()`:
 
@@ -192,6 +208,7 @@ sendAndConfirmTransaction →  broadcast with `confirmed` commitment
 - **npm**, **pnpm**, or **yarn**
 - A funded Solana devnet master wallet (for agent auto-funding on boot)
 - A [Groq API key](https://console.groq.com) (free — for LLM trade decisions)
+- An [Upstash Redis](https://upstash.com) database (free tier — for persistent state)
 
 ---
 
@@ -220,18 +237,43 @@ WALLET_ENCRYPTION_KEY=your-32-character-secret-here!!
 # Used to auto-fund agent wallets on first boot (must hold ≥ 1.05 SOL on devnet)
 # Generate with: node -e "const {Keypair}=require('@solana/web3.js');console.log(JSON.stringify(Array.from(Keypair.generate().secretKey)))"
 # Fund at: https://faucet.solana.com
-MASTER_WALLET=[12,34,56,...] 
+MASTER_WALLET=[12,34,56,...]
 
 # Required — Groq API key for LLM trade decisions (free at console.groq.com)
 # Without this, agents fall back to the rule-based strategy
 GROQ_API_KEY=gsk_...
 
+# Required — Upstash Redis REST credentials for persistent agent state
+# Get these from your Upstash dashboard → your database → REST API
+KV_REST_API_URL=https://your-db.upstash.io
+KV_REST_API_TOKEN=your-upstash-token
+
 # Optional — override the default Solana devnet RPC
 SOLANA_RPC_URL=https://api.devnet.solana.com
-
-# Required for the autonomous loop route to call the trade API internally
-NEXT_PUBLIC_BASE_URL=http://localhost:3000
 ```
+
+---
+
+## Deploying to Vercel
+
+Agentixx is designed for Vercel. Agent state persists across serverless cold starts via Upstash Redis.
+
+```bash
+# 1. Install Vercel CLI
+npm install -g vercel
+
+# 2. Link your project
+vercel link
+
+# 3. Add env vars in Vercel dashboard:
+#    Settings → Environment Variables → add all vars from .env.local
+#    Make sure KV_REST_API_URL and KV_REST_API_TOKEN are set for Production
+
+# 4. Deploy
+git push  # Vercel auto-deploys on push to main
+```
+
+> **Note:** After adding env vars in the Vercel dashboard, you must redeploy for them to take effect. Either push a new commit or click **Redeploy** in the dashboard.
 
 ---
 
@@ -248,7 +290,8 @@ On the first request to `/api/agents`, the server will:
 1. Generate keypairs for all configured agents
 2. Encrypt and persist keystores to `.agent-keystore/`
 3. Transfer 1 SOL to each agent from the master wallet
-4. Mark agents as `funded` and ready
+4. Persist agent records to Upstash Redis
+5. Mark agents as `funded` and ready
 
 > **Note:** The master wallet must hold at least 1.05 SOL on devnet before starting.
 > Top it up at [faucet.solana.com](https://faucet.solana.com) using its public key.
@@ -265,7 +308,9 @@ GET  /api/agents                    → fleet status, balances, last trades, dec
 POST /api/agents/:id/trade          → { type: "BUY" | "SELL" | "HOLD" } or {} for autonomous
 POST /api/agents/:id/loop           → { action: "start" | "stop" }
 GET  /api/agents/:id/loop           → loop status for agent
-POST /api/agents/:id/airdrop        → request 1 SOL devnet airdrop
+POST /api/agents/:id/airdrop        → fund agent from master wallet (1 SOL)
+POST /api/agents/:id/faucet         → request 1 SOL from devnet faucet
+POST /api/agents/:id/execute        → trigger one autonomous trade cycle
 GET  /api/agents/:id/history        → on-chain transaction history
 ```
 
@@ -386,6 +431,7 @@ you can confirm the decision path without reading server logs.
 | Agent overspending | `MIN_BALANCE_SOL = 0.05` reserve enforced before every loop tick |
 | Master wallet exposure | Used only for initial funding transfers; never stored in agent state |
 | Simulated signatures | All BUY and SELL actions produce real, verifiable on-chain signatures |
+| Serverless race conditions | Distributed Redis lock (`SET NX`) prevents duplicate initialization |
 
 See [SECURITY.md](./SECURITY.md) for the full threat model.
 
@@ -407,6 +453,7 @@ See [SECURITY.md](./SECURITY.md) for the full threat model.
 | ✅ Real AI decision-making | Groq `llama-3.1-8b-instant` with live Pyth price context |
 | ✅ Live price oracle | Pyth Network Hermes REST API — real SOL/USD feed, no API key required |
 | ✅ Multiple independent agents | `alpha-trader`, `beta-hodler`, `gamma-arbitrage` |
+| ✅ Serverless-compatible persistence | Upstash Redis — agent state survives Vercel cold starts |
 | ✅ SKILLS.md | [`SKILLS.md`](./SKILLS.md) — machine-readable API + agent spec |
 
 ---
@@ -418,6 +465,7 @@ See [SECURITY.md](./SECURITY.md) for the full threat model.
 - [Solana Web3.js Docs](https://solana-labs.github.io/solana-web3.js/)
 - [Pyth Network Price Feeds](https://pyth.network/developers/price-feed-ids)
 - [Groq Console](https://console.groq.com)
+- [Upstash Redis](https://upstash.com)
 
 ---
 

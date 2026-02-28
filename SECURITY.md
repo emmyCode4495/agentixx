@@ -21,6 +21,8 @@ and production hardening recommendations.
 | LLM prompt injection | Medium | Structured JSON response parsing with strict type validation — unexpected values throw before execution |
 | Unverifiable trade decisions | Medium | SELL decisions record full LLM reasoning on-chain via signed Memo tx — permanently auditable |
 | Simulated / unverifiable trades | Medium | All BUY and SELL produce real on-chain signatures verifiable on Explorer |
+| Serverless race conditions | Medium | Distributed Redis lock (`SET NX`) prevents duplicate agent initialization across concurrent cold starts |
+| Redis credential exposure | Medium | `KV_REST_API_TOKEN` stored as environment secret — never hardcoded or logged |
 | External API unavailability | Low | Pyth and Groq failures handled gracefully — price falls back to simulated range, decisions fall back to rule-based strategy |
 | RPC request flooding | Low | Singleton connection, staggered loop starts, graceful error handling |
 | Mainnet fund exposure | Low | Hardcoded devnet RPC — no mainnet interaction possible |
@@ -102,7 +104,35 @@ WALLET_ENCRYPTION_KEY=your-32-character-secret-here!!
 
 ---
 
-## 3. WalletEngine Isolation
+## 3. Persistent State — Upstash Redis
+
+Agent runtime state (balances, trades, status, P&L) is persisted to **Upstash Redis**
+via the `@upstash/redis` package. This replaces the previous in-memory `globalThis`
+store, which was wiped on every Vercel serverless cold start.
+
+### Distributed Initialization Lock
+
+On first deployment, multiple serverless function instances may receive requests
+simultaneously. A Redis atomic lock prevents duplicate agent initialization:
+
+```ts
+// SET NX — only the first instance proceeds; others wait up to 30s
+const lock = await kv.set("agents:init:lock", "1", { nx: true, ex: 120 })
+```
+
+The lock expires after 120 seconds to prevent permanent deadlock if the initializing
+instance crashes mid-flight.
+
+### Credential Security
+
+- `KV_REST_API_URL` and `KV_REST_API_TOKEN` are stored as Vercel environment secrets
+- Credentials are never hardcoded, logged, or included in any API response
+- The Redis token grants full read/write access — treat it with the same care as
+  `MASTER_WALLET` and `WALLET_ENCRYPTION_KEY`
+
+---
+
+## 4. WalletEngine Isolation
 
 All blockchain interactions are funnelled through `WalletEngine` — agents never access
 the raw keypair or RPC connection directly.
@@ -130,7 +160,7 @@ and is only exposed via a getter for read-only public key access.
 
 ---
 
-## 4. Agent Sandbox Rules
+## 5. Agent Sandbox Rules
 
 Each agent is strictly isolated:
 
@@ -140,15 +170,16 @@ Each agent is strictly isolated:
 - **No key export** — `toJSON()` and all serialisation methods exclude the keypair
 - **No arbitrary transactions** — all transactions pass `validateTransaction()` before
   signing; policy violations throw before any signing occurs
-- **Stateless between restarts** — the only persistent state is the encrypted keystore;
-  runtime state (balance, trades, PnL) is rebuilt from devnet on initialisation
+- **Stateless between restarts** — the only persistent state is the encrypted keystore
+  and the Redis store; runtime state (balance, trades, PnL) is rebuilt from devnet
+  and Redis on initialisation
 
 Compromise or misbehaviour of one agent does not affect any other agent's keys,
 funds, or execution loop.
 
 ---
 
-## 5. Transaction Security
+## 6. Transaction Security
 
 ### Replay Protection
 
@@ -180,7 +211,7 @@ full AI reasoning permanently auditable on-chain — not just in local logs.
 
 ---
 
-## 6. External API Security
+## 7. External API Security
 
 ### Pyth Network Price Oracle
 
@@ -208,7 +239,7 @@ Trade decisions are made by Groq's `llama-3.1-8b-instant` via its OpenAI-compati
 
 ---
 
-## 7. Network Safety
+## 8. Network Safety
 
 - **Devnet only** — the RPC URL is `https://api.devnet.solana.com`. There is no code
   path that connects to mainnet.
@@ -223,7 +254,7 @@ Trade decisions are made by Groq's `llama-3.1-8b-instant` via its OpenAI-compati
 
 ---
 
-## 8. Logging & Auditing
+## 9. Logging & Auditing
 
 Every agent logs:
 - Keypair initialisation (public key only — never private key)
@@ -238,8 +269,8 @@ Every agent logs:
 - Errors with descriptive messages
 
 No log call anywhere in the codebase includes the secret key, the master wallet key,
-the encryption password, the Groq API key, or the raw keystore bytes. The `Keypair`
-object is never passed to `JSON.stringify()` or any logger.
+the encryption password, the Groq API key, the Redis token, or the raw keystore bytes.
+The `Keypair` object is never passed to `JSON.stringify()` or any logger.
 
 On-chain history provides a permanent, tamper-proof audit trail. Every SELL decision
 is recorded as a signed Memo transaction containing the agent ID, live price, price
@@ -248,19 +279,20 @@ verifiable on-chain, not just in local logs.
 
 ---
 
-## 9. Environment Variables
+## 10. Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `WALLET_ENCRYPTION_KEY` | Yes | 32-character secret for AES-256-GCM encryption. Never commit. |
 | `MASTER_WALLET` | Yes | JSON array of 64 bytes — master Solana keypair for agent funding on boot. Never commit. |
 | `GROQ_API_KEY` | Recommended | Groq API key for LLM trade decisions. Agents fall back to rule-based strategy if absent. |
+| `KV_REST_API_URL` | Yes | Upstash Redis REST URL for persistent agent state. Never commit. |
+| `KV_REST_API_TOKEN` | Yes | Upstash Redis REST token. Grants full read/write access. Never commit. |
 | `SOLANA_RPC_URL` | No | Override devnet RPC endpoint. Defaults to `https://api.devnet.solana.com`. |
-| `NEXT_PUBLIC_BASE_URL` | Yes | Base URL for internal API calls from the loop route. |
 
 ---
 
-## 10. Production Hardening Recommendations
+## 11. Production Hardening Recommendations
 
 These mitigations are out of scope for a devnet prototype but should be applied
 before any mainnet or production deployment:
@@ -270,6 +302,7 @@ before any mainnet or production deployment:
 - **Rotate `WALLET_ENCRYPTION_KEY`** periodically; re-encrypt all keystores on rotation
 - **Rotate `MASTER_WALLET`** after initial fleet funding — it serves no further purpose
   and should be decommissioned to reduce the attack surface
+- **Rotate Redis credentials** periodically via the Upstash dashboard
 - **Run agents in isolated containers** (Docker, Kubernetes pods) with no shared
   filesystem access between agent processes
 - **Add spending limits** to `validateTransaction()` — maximum SOL per transaction,
@@ -285,7 +318,7 @@ before any mainnet or production deployment:
 
 ---
 
-## 11. Security Goals
+## 12. Security Goals
 
 | Goal | Status |
 |------|--------|
@@ -298,3 +331,5 @@ before any mainnet or production deployment:
 | **LLM safety** — invalid or injected LLM outputs rejected before execution | ✅ |
 | **Oracle safety** — price feed failures handled gracefully with auditable fallback | ✅ |
 | **Master wallet isolation** — funding credential never persisted in agent state | ✅ |
+| **Serverless safety** — distributed Redis lock prevents duplicate initialization | ✅ |
+| **Persistence security** — Redis credentials stored as environment secrets, never logged | ✅ |

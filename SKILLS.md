@@ -94,6 +94,13 @@ This fallback is also used as the baseline to verify LLM behaviour — if the
 agent consistently HOLDs near current SOL prices (~$170–$190), the LLM and
 fallback are in agreement, not broken.
 
+### 7. Persistent State
+
+All agent runtime state (balances, trades, status, P&L) is persisted to
+**Upstash Redis** via `@upstash/redis`. This ensures state survives across
+Vercel serverless cold starts and re-deployments. A distributed lock prevents
+duplicate initialization when multiple function instances start simultaneously.
+
 ---
 
 ## Wallet Funding
@@ -104,7 +111,8 @@ in `.env.local` as `MASTER_WALLET` (a JSON array of 64 bytes).
 - Each agent receives **1 SOL** from the master wallet if its balance is below 1 SOL
 - The master wallet must hold at least **1.05 SOL** before boot or initialization will fail
 - If auto-funding fails, the agent falls back to `"idle"` status and logs the reason
-- Manual top-up is available via `POST /api/agents/:id/airdrop`
+- Manual top-up from master wallet: `POST /api/agents/:id/airdrop`
+- Manual top-up from devnet faucet: `POST /api/agents/:id/faucet`
 
 ---
 
@@ -145,6 +153,7 @@ Response:
 Notes:
 - `initialized` and `initializing` flags indicate boot state
 - `lastTrade` is the most recent `TradeRecord` or `null`
+- `tradeCount` is derived from `trades.length` in the persisted agent record
 - Balances are refreshed from devnet RPC on every GET call
 
 ### Execute a trade
@@ -222,15 +231,35 @@ When started, the loop fires every **15 seconds**. Each tick:
 3. Calls `getLLMDecision()` with full market + agent context
 4. Falls back to `getRuleBasedDecision()` if Groq is unavailable
 5. Executes the resulting BUY / SELL / HOLD via the trade route
+6. Persists the updated trade record and balance to Upstash Redis
 
-### Request airdrop
+### Fund from master wallet
 
 ```
 POST /api/agents/:id/airdrop
 ```
 
-Requests 1 SOL from Solana devnet faucet. Rate-limited by the network —
-stagger requests across agents to avoid 429 errors.
+Transfers 1 SOL from the master wallet to the agent. Requires `MASTER_WALLET`
+to be set and hold at least 1.1 SOL. Skips silently if agent already has ≥ 1 SOL.
+
+### Fund from devnet faucet
+
+```
+POST /api/agents/:id/faucet
+```
+
+Requests 1 SOL from Solana's devnet faucet. Rate-limited by the network —
+stagger requests across agents to avoid 429 errors. Returns `rateLimited: true`
+if the faucet rejects the request so the dashboard can surface a clear error.
+
+### Trigger one autonomous cycle
+
+```
+POST /api/agents/:id/execute
+```
+
+Triggers a single autonomous trade cycle for the agent — equivalent to one
+loop tick. Useful for testing without starting the full loop.
 
 ### Get transaction history
 
@@ -238,7 +267,7 @@ stagger requests across agents to avoid 429 errors.
 GET /api/agents/:id/history
 ```
 
-Returns up to 15 recent confirmed transaction signatures fetched directly
+Returns up to 20 recent confirmed transaction signatures fetched directly
 from devnet RPC — not from local cache.
 
 ---
@@ -320,6 +349,7 @@ Agents operate within strict boundaries enforced by `WalletEngine`:
 - **Per-agent isolation** — no agent can read or modify another agent's keystore
 - **No plaintext logging** — keypairs are excluded from all log output and JSON serialisation
 - **Master wallet isolation** — master keypair is used only for initial funding transfers and is never stored in agent state
+- **Redis credential safety** — `KV_REST_API_TOKEN` stored as environment secret, never logged or serialised
 
 Encryption spec:
 
@@ -339,9 +369,15 @@ Auth tag  : 16 bytes — detects any tampering before decryption
 |----------|----------|-------------|
 | `MASTER_WALLET` | ✅ | JSON array of 64 bytes — master Solana keypair for agent funding |
 | `GROQ_API_KEY` | ⚠️ | Groq API key for LLM decisions. Falls back to rule-based if absent |
+| `KV_REST_API_URL` | ✅ | Upstash Redis REST URL for persistent agent state |
+| `KV_REST_API_TOKEN` | ✅ | Upstash Redis REST token. Grants full read/write access. Never commit. |
+| `WALLET_ENCRYPTION_KEY` | ✅ | 32-character secret for AES-256-GCM keystore encryption |
+| `SOLANA_RPC_URL` | No | Override devnet RPC. Defaults to `https://api.devnet.solana.com` |
 
 Without `MASTER_WALLET`, agents cannot be funded on boot and will start in `"idle"` state.
 Without `GROQ_API_KEY`, agents still trade but use the rule-based fallback exclusively.
+Without `KV_REST_API_URL` and `KV_REST_API_TOKEN`, agent state will not persist across
+serverless cold starts and agents will re-initialize on every request.
 
 ---
 
@@ -355,8 +391,8 @@ The following agent IDs are registered in the current fleet:
 | `beta-hodler` | LLM (Groq llama-3.1-8b-instant) + rule-based fallback |
 | `gamma-arbitrage` | LLM (Groq llama-3.1-8b-instant) + rule-based fallback |
 
-To add a new agent, register its ID in `lib/agentStore.ts` and add a
-`case` to `lib/agents/registry.ts`.
+To add a new agent, register its ID in `lib/agentStore.ts` (`AGENT_IDS` array) and
+add a `case` to `lib/agents/registry.ts`.
 
 ---
 
@@ -373,7 +409,7 @@ To confirm Groq is being reached and not falling back silently, check the follow
 
 **Trade response** — the `decisionSource` field confirms the path taken:
 ```json
-{ "decisionSource": "llm" }       ← Groq responded
+{ "decisionSource": "llm" }        ← Groq responded
 { "decisionSource": "rule-based" } ← fallback was used
 ```
 
