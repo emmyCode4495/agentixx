@@ -445,7 +445,7 @@ See [SECURITY.md](./SECURITY.md) for the full threat model.
 | ✅ Sign transactions automatically | `WalletEngine.execute()` in `lib/wallet/engine.ts` |
 | ✅ Hold SOL or SPL tokens | Live devnet balances tracked per agent |
 | ✅ Interact with a test dApp or protocol | BUY → SOL transfer; SELL → Memo program tx with on-chain LLM reasoning |
-| ✅ Deep dive (written) | [`/about`](/about) — wallet design, security, AI integration |
+| ✅ Deep dive (written) | [`https://agentixx.vercel.app/about`](/about) — wallet design, security, AI integration |
 | ✅ Open-source with README | This file + [github.com/emmyCode4495/agentixx](https://github.com/emmyCode4495/agentixx) |
 | ✅ Working prototype on devnet | Live dashboard at `/dashboard` |
 | ✅ Safe key management | AES-256-GCM + scrypt, GCM auth tag tamper detection, master wallet isolation |
